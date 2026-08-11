@@ -131,6 +131,7 @@ class NIMClient:
                     )
                     await asyncio.sleep(wait)
                 else:
+                    raise
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_exc = e
                 if attempt < retries:
