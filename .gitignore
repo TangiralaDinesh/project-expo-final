@@ -1,0 +1,15 @@
+# Ignore everything
+/*
+
+# But allow these
+!/agent/
+!/.gitignore
+
+# Standard ignores
+__pycache__/
+*.pyc
+*.db
+.env
+.pytest_cache/
+node_modules/
+.DS_Store
