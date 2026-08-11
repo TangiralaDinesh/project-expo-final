@@ -4,6 +4,9 @@
 # But allow these
 !/agent/
 !/.gitignore
+!/github_researchtool.py
+!/_test_workflow.py
+!/_verify.py
 
 # Standard ignores
 __pycache__/
