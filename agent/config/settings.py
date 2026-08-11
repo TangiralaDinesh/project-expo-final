@@ -61,10 +61,10 @@ class NIMSettings:
     per_key_concurrency: int = 5
 
     # Timeouts (seconds)
-    chat_timeout: float = 30.0
-    fast_timeout: float = 5.0
-    embed_timeout: float = 20.0
-    stream_timeout: float = 60.0
+    chat_timeout: float = field(default_factory=lambda: float(_env("NIM_CHAT_TIMEOUT", "30.0")))
+    fast_timeout: float = field(default_factory=lambda: float(_env("NIM_FAST_TIMEOUT", "5.0")))
+    embed_timeout: float = field(default_factory=lambda: float(_env("NIM_EMBED_TIMEOUT", "20.0")))
+    stream_timeout: float = field(default_factory=lambda: float(_env("NIM_STREAM_TIMEOUT", "60.0")))
 
     # Retry config
     max_retries: int = 3
