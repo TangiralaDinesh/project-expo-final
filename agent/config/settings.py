@@ -20,16 +20,20 @@ def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
-def _env_list(prefix: str, max_keys: int = 10) -> list[str]:
-    """Collect NVIDIA_API_KEY_1, NVIDIA_API_KEY_2, ... into a list.
-    Falls back to a single NIM_API_KEY if the numbered pattern isn't set."""
+def _env_list(prefix: str, max_keys: int = 10, fallback_key: str = "") -> list[str]:
+    """Collect PREFIX_1, PREFIX_2, ... into a list.
+    Falls back to fallback_key or the bare prefix if the numbered pattern isn't set."""
     keys = []
     for i in range(1, max_keys + 1):
         k = os.environ.get(f"{prefix}_{i}", "")
         if k:
             keys.append(k)
+    if not keys and fallback_key:
+        single = os.environ.get(fallback_key, "")
+        if single:
+            keys.append(single)
     if not keys:
-        single = os.environ.get("NIM_API_KEY", "")
+        single = os.environ.get(prefix, "")
         if single:
             keys.append(single)
     return keys
@@ -51,7 +55,7 @@ class NIMSettings:
         "NIM_EMBED_MODEL", "nvidia/nv-embedqa-e5-v5"))
 
     # Multi-key round-robin — 2 keys from separate accounts = 2× throughput
-    api_keys: list[str] = field(default_factory=lambda: _env_list("NVIDIA_API_KEY"))
+    api_keys: list[str] = field(default_factory=lambda: _env_list("NVIDIA_API_KEY", fallback_key="NIM_API_KEY"))
     
     # Partitioned Dedicated Pools
     agent_keys: list[str] = field(default_factory=lambda: _env_list("AGENT_NIM_KEY"))
