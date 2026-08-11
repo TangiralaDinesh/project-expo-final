@@ -212,6 +212,50 @@ class NIMClient:
             timeout=self._cfg.fast_timeout,
         )
 
+    async def chat_worker(
+        self,
+        messages: list[dict],
+        *,
+        model: str = "",
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+        response_format_json: bool = False,
+    ) -> str:
+        """Dedicated worker for non-thinking high-speed semantic tasks via Groq."""
+        if not self._cfg.groq_api_key:
+            return await self.chat_fast(
+                messages, model=model, temperature=temperature,
+                max_tokens=max_tokens, response_format_json=response_format_json
+            )
+
+        model = model or self._cfg.groq_worker_model
+        body: dict = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if response_format_json:
+            body["response_format"] = {"type": "json_object"}
+
+        async def _do():
+            session = self._ensure_session()
+            headers = {
+                "Authorization": f"Bearer {self._cfg.groq_api_key}",
+                "Content-Type": "application/json",
+            }
+            async with session.post(
+                f"{self._cfg.groq_base_url}/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=aiohttp.ClientTimeout(total=self._cfg.fast_timeout),
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                return data["choices"][0]["message"]["content"]
+
+        return await self._call_with_backoff(_do)
+
     # ----- Streaming chat ----------------------------------------------------
 
     async def chat_stream(

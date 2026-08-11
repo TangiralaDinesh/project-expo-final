@@ -62,7 +62,7 @@ async def generate_clarifying_question(
     ]
 
     try:
-        raw = await client.chat_fast(
+        raw = await client.chat_worker(
             messages, temperature=CLARIFY_TEMPERATURE, response_format_json=True,
         )
         parsed = _parse(raw)

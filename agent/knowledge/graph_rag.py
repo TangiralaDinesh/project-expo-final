@@ -159,7 +159,7 @@ async def _extract_query_entities(query: str, client: NIMClient) -> list[str]:
             )},
             {"role": "user", "content": query},
         ]
-        raw = await client.chat_fast(messages, temperature=0.0, max_tokens=100)
+        raw = await client.chat_worker(messages, temperature=0.0, max_tokens=100)
 
         import json
         text = raw.strip()
