@@ -134,17 +134,20 @@ class NIMClient:
                     raise
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_exc = e
+                import traceback
+                error_details = traceback.format_exc()
                 if attempt < retries:
                     wait = min(
                         self._cfg.backoff_base * (2 ** attempt),
                         self._cfg.backoff_max,
                     )
                     logger.warning(
-                        "NIM transient error on attempt %d: %s, backing off %.1fs",
-                        attempt + 1, e, wait,
+                        "NIM transient error on attempt %d: %s\nDetails:\n%s\nBacking off %.1fs",
+                        attempt + 1, type(e).__name__, error_details, wait,
                     )
                     await asyncio.sleep(wait)
                 else:
+                    logger.error("NIM fatal error after %d retries: %s\n%s", retries, type(e).__name__, error_details)
                     raise
 
         raise last_exc  # type: ignore[misc]
