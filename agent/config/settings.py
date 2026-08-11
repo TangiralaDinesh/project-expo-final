@@ -100,6 +100,7 @@ class SerpAPISettings:
     """SerpAPI fallback — Google search when Brave key absent."""
 
     api_key: str = field(default_factory=lambda: _env("SERPAPI_KEY", ""))
+    api_keys: list[str] = field(default_factory=lambda: _env_list("SERPAPI_KEY"))
     base_url: str = "https://serpapi.com/search"
     engine: str = "google"
     timeout: float = 10.0

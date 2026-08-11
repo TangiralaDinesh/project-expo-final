@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import re
 import logging
+import asyncio
+import random
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -335,10 +337,16 @@ async def _serpapi_fallback(
         session = aiohttp.ClientSession()
 
     try:
+        # Pick random key from list, fallback to single key
+        active_key = (
+            random.choice(settings.serpapi.api_keys)
+            if settings.serpapi.api_keys else settings.serpapi.api_key
+        )
+        
         params = {
             "engine": settings.serpapi.engine,
             "q": query,
-            "api_key": settings.serpapi.api_key,
+            "api_key": active_key,
             "num": str(min(max_results, 10)),
             "hl": "en",
             "gl": "us",
