@@ -76,82 +76,79 @@ async def brave_search(
     use_llm_context: bool = True,
     session: Optional[aiohttp.ClientSession] = None,
 ) -> BraveResults:
-    """Full Brave search using ALL available endpoints.
+    """Full parallel web search utilizing both Brave and SerpAPI simultaneously.
+    If both fail or are missing keys, falls back to DuckDuckGo."""
+    own_session = session is None
+    if own_session:
+        session = aiohttp.ClientSession()
 
-    Priority pipeline:
-    1. LLM Context endpoint (if available) — best quality, pre-extracted
-    2. Web search with extra_snippets — good snippets reduce fetch needs
-    3. Image search — when query needs visual results
-    Priority pipeline:
-    1. Brave (if BRAVE_API_KEY set) — LLM Context + web + images
-    2. SerpAPI (if SERPAPI_KEY set) — Google search via API
-    3. DuckDuckGo (always available) — HTML scrape fallback
+    try:
+        tasks = []
 
-    Returns a BraveResults with all result types populated.
-    """
-    # ── Tier 1: Brave API ──
-    if settings.brave.api_key:
-        own_session = session is None
-        if own_session:
-            session = aiohttp.ClientSession()
+        # ── Branch 1: Brave ──
+        if settings.brave.api_key:
+            async def _do_brave():
+                b_tasks = [
+                    _brave_web_search(query, max_results, session),
+                    _brave_llm_context(query, session) if use_llm_context else asyncio.sleep(0),
+                    _brave_image_search(query, session) if include_images else asyncio.sleep(0),
+                ]
+                b_res = await asyncio.gather(*b_tasks, return_exceptions=True)
+                w = b_res[0] if isinstance(b_res[0], list) else []
+                c = b_res[1] if isinstance(b_res[1], list) else []
+                i = b_res[2] if isinstance(b_res[2], list) else []
+                return BraveResults(web_results=w, context_results=c, image_results=i)
+            
+            tasks.append(_do_brave())
 
-        try:
-            import asyncio
-            tasks = []
+        # ── Branch 2: SerpAPI ──
+        if settings.serpapi.api_key:
+            async def _do_serp():
+                web = await _serpapi_fallback(query, max_results, session)
+                return BraveResults(web_results=web or [])
+            tasks.append(_do_serp())
 
-            # Always do web search with extra_snippets
-            tasks.append(_brave_web_search(query, max_results, session))
-
-            # LLM Context endpoint — the premium feature
-            if use_llm_context:
-                tasks.append(_brave_llm_context(query, session))
-            else:
-                async def _empty_ctx():
-                    return []
-                tasks.append(_empty_ctx())
-
-            # Image search — optional
-            if include_images:
-                tasks.append(_brave_image_search(query, session))
-            else:
-                async def _empty_img():
-                    return []
-                tasks.append(_empty_img())
-
+        # ── Execute Parallel ──
+        if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            web_results = results[0] if isinstance(results[0], list) else []
-            context_results = results[1] if isinstance(results[1], list) else []
-            image_results = results[2] if isinstance(results[2], list) else []
-
-            if web_results or context_results:
+            
+            web_results = []
+            context_results = []
+            image_results = []
+            
+            for r in results:
+                if isinstance(r, BraveResults):
+                    web_results.extend(r.web_results)
+                    context_results.extend(r.context_results)
+                    image_results.extend(r.image_results)
+                elif isinstance(r, Exception):
+                    logger.warning("Parallel search branch failed: %s", r)
+                    
+            # Deduplicate by URL
+            seen = set()
+            unique_web = []
+            for w in web_results:
+                url = w.get("url")
+                if url and url not in seen:
+                    seen.add(url)
+                    unique_web.append(w)
+                    
+            if unique_web or context_results:
                 return BraveResults(
-                    web_results=web_results,
+                    web_results=unique_web[:max_results],
                     context_results=context_results,
-                    image_results=image_results,
+                    image_results=image_results
                 )
-            # Empty results — fall through to SerpAPI
-            logger.info("Brave returned empty, trying SerpAPI fallback")
+                
+            logger.info("Parallel APIs returned empty, trying DDG fallback")
 
-        except Exception as e:
-            logger.warning("Brave search failed: %s, trying SerpAPI", e)
-        finally:
-            if own_session and session:
-                await session.close()
-                session = None  # Reset for next tier
+        # ── Branch 3: DuckDuckGo Fallback ──
+        web = await _ddg_fallback(query, max_results, session)
+        return BraveResults(web_results=web)
 
-    # ── Tier 2: SerpAPI (Google search) ──
-    if settings.serpapi.api_key:
-        try:
-            web = await _serpapi_fallback(query, max_results, session)
-            if web:
-                return BraveResults(web_results=web)
-        except Exception as e:
-            logger.warning("SerpAPI failed: %s, trying DDG", e)
-
-    # ── Tier 3: DuckDuckGo (always works, no API key) ──
-    web = await _ddg_fallback(query, max_results, session)
-    return BraveResults(web_results=web)
+    finally:
+        if own_session and session:
+            await session.close()
 
 
 # ── Brave Web Search with extra_snippets ──

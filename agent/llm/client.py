@@ -49,12 +49,18 @@ class NIMClient:
         await client.close()
     """
 
-    def __init__(self, nim_settings=None):
+    def __init__(self, nim_settings=None, pool: str = "agent"):
         self._cfg = nim_settings or settings.nim
         self._session: Optional[aiohttp.ClientSession] = None
 
-        # Multi-key round-robin state
-        self._keys = list(self._cfg.api_keys) if self._cfg.api_keys else [""]
+        # Multi-key round-robin state based on selected pool
+        if pool == "code" and self._cfg.code_keys:
+            self._keys = list(self._cfg.code_keys)
+        elif pool == "agent" and self._cfg.agent_keys:
+            self._keys = list(self._cfg.agent_keys)
+        else:
+            self._keys = list(self._cfg.api_keys) if self._cfg.api_keys else [""]
+            
         self._key_idx = 0
         self._key_lock = asyncio.Lock()
 

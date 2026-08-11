@@ -52,6 +52,10 @@ class NIMSettings:
 
     # Multi-key round-robin — 2 keys from separate accounts = 2× throughput
     api_keys: list[str] = field(default_factory=lambda: _env_list("NVIDIA_API_KEY"))
+    
+    # Partitioned Dedicated Pools
+    agent_keys: list[str] = field(default_factory=lambda: _env_list("AGENT_NIM_KEY"))
+    code_keys: list[str] = field(default_factory=lambda: _env_list("CODE_NIM_KEY"))
 
     # Per-key concurrency semaphore slots
     per_key_concurrency: int = 5

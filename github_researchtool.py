@@ -136,15 +136,20 @@ def get_github_token() -> str:
 
 
 def get_all_api_keys() -> list:
-    """Collect all available NVIDIA API keys. Tries NVIDIA_API_KEY_1/2 first
-    (the explicit two-account pattern), then NVIDIA_LLM_KEY_1..4, then
-    single NVIDIA_API_KEY as fallback. Returns deduplicated list."""
+    """Collect all available NVIDIA API keys. Tries CODE_NIM_KEY_1/2 first, 
+    then NVIDIA_API_KEY_1/2, then legacy keys. Returns deduplicated list."""
     keys = []
-    # Two-account pattern (preferred)
+    # Dedicated Code Pool
     for i in range(1, 5):
-        k = os.environ.get(f"NVIDIA_API_KEY_{i}")
+        k = os.environ.get(f"CODE_NIM_KEY_{i}")
         if k:
             keys.append(k)
+    # Generic Pool (preferred)
+    if not keys:
+        for i in range(1, 5):
+            k = os.environ.get(f"NVIDIA_API_KEY_{i}")
+            if k:
+                keys.append(k)
     # Legacy pattern
     if not keys:
         for i in range(1, 5):
