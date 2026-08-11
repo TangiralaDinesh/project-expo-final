@@ -130,7 +130,7 @@ async def grade_retrieval(
     ]
 
     try:
-        raw = await client.chat(messages, temperature=0.1, max_tokens=200)
+        raw = await client.chat_fast(messages, temperature=0.1, max_tokens=200)
         return _parse_grade(raw, query)
     except Exception as e:
         logger.warning("Grade LLM failed: %s, defaulting to AMBIGUOUS", e)

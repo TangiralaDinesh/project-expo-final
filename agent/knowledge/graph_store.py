@@ -213,7 +213,7 @@ async def extract_entities(
     ]
 
     try:
-        raw = await client.chat(messages, temperature=0.1, max_tokens=800)
+        raw = await client.chat_fast(messages, temperature=0.1, max_tokens=800)
 
         # Parse JSON
         text_clean = raw.strip()

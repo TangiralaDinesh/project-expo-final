@@ -111,7 +111,7 @@ async def _run_one_persona(
         )},
         {"role": "user", "content": f"Goal: {goal}\n\nArtifact to review:\n{artifact}"},
     ]
-    raw = await client.chat(messages, temperature=CRITIQUE_TEMPERATURE, response_format_json=True)
+    raw = await client.chat_fast(messages, temperature=CRITIQUE_TEMPERATURE, response_format_json=True)
     parsed = _parse(raw)
     return CritiqueResult(
         persona_name=persona.name,

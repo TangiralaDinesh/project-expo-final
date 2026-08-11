@@ -260,7 +260,7 @@ def create_app() -> FastAPI:
                 {"role": "user", "content": f"URL: {req.url}\n\nContent:\n{content[:8000]}"},
             ]
             try:
-                summary = await client.chat(messages, temperature=0.1)
+                summary = await client.chat_fast(messages, temperature=0.1)
                 result["summary"] = summary
             except Exception as e:
                 result["summary_error"] = str(e)
