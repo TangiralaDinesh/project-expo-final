@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import logging
+import time
+import random
+import math
 from typing import AsyncIterator, Optional
 
 import aiohttp
@@ -222,7 +224,12 @@ class NIMClient:
         response_format_json: bool = False,
     ) -> str:
         """Dedicated worker for non-thinking high-speed semantic tasks via Groq."""
-        if not self._cfg.groq_api_key:
+        # Pick random key from list, fallback to single key
+        active_key = (
+            random.choice(self._cfg.groq_api_keys)
+            if self._cfg.groq_api_keys else self._cfg.groq_api_key
+        )
+        if not active_key:
             return await self.chat_fast(
                 messages, model=model, temperature=temperature,
                 max_tokens=max_tokens, response_format_json=response_format_json
@@ -241,7 +248,7 @@ class NIMClient:
         async def _do():
             session = self._ensure_session()
             headers = {
-                "Authorization": f"Bearer {self._cfg.groq_api_key}",
+                "Authorization": f"Bearer {active_key}",
                 "Content-Type": "application/json",
             }
             async with session.post(

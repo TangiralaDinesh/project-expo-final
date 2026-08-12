@@ -47,6 +47,7 @@ class NIMSettings:
         "NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"))
         
     groq_api_key: str = field(default_factory=lambda: _env("GROQ_API_KEY", ""))
+    groq_api_keys: list[str] = field(default_factory=lambda: _env_list("GROQ_API_KEY"))
     groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_worker_model: str = field(default_factory=lambda: _env("GROQ_WORKER_MODEL", "llama-3.1-8b-instant"))
 
