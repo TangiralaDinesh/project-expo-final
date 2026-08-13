@@ -3,7 +3,7 @@ Entry gate — the original "hallucination threshold."
 
 Decides: answer directly from parametric knowledge, or retrieve first?
 Combines regex fast-path (0ms for 90% of queries) from github_researchtool.py
-with LLM fallback for ambiguous cases.
+with Groq+LLM fallback for ambiguous cases.
 
 Six-way classification:
   - PARAMETRIC: stable algorithms, established concepts — no retrieval
@@ -15,6 +15,12 @@ Six-way classification:
 
 Fails TOWARD retrieval on ambiguity — unnecessary search costs latency,
 a skipped necessary one costs a hallucinated answer.
+
+REGEX FAST-PATHS (0ms, no API call):
+  - Math/arithmetic → PARAMETRIC
+  - Definition/explanation → PARAMETRIC
+  - Syntax/language → PARAMETRIC
+  - Current events/time-sensitive → SEMANTIC
 """
 
 from __future__ import annotations
@@ -44,21 +50,228 @@ _URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# ── FAST-PATH REGEX PATTERNS (0ms classification) ──
+# Math/arithmetic — LLM knows this
+_MATH_PATTERN = re.compile(
+    r"""
+    (?:^|\b)(?:
+        \d+\s*[\+\-\*/\%\^]\s*\d+              # arithmetic: 2+2, 3*4, etc
+        |what\s+(?:is|are)\s+\d+\s*[\+\-\*/]  # "what is 2+2"
+        |calculate|compute|solve              # action words
+        |(?:square|cube|sqrt|log|sin|cos|tan|integral|derivative)  # math functions
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+# Definition/explanation of common concepts — LLM knows
+_DEFINITION_PATTERN = re.compile(
+    r"""
+    (?:
+        (?:what|define|explain|describe)\s+(?:is|are|the|a)  # question starters
+        |(?:difference\s+between|how\s+(?:do|does|is))  # comparative/how
+        |(?:meaning\s+of|definition\s+of|concept\s+of)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+# Programming syntax/language concepts — need CODE or SEMANTIC
+_SYNTAX_PATTERN = re.compile(
+    r"""
+    (?:
+        python\s+syntax|javascript\s+(?:syntax|how\s+to)
+        |what\s+(?:is|are|does)\s+(?:a|an)?\s*(?:loop|function|class|async|await|var|const)
+        |how\s+(?:to|do\s+i)\s+(?:write|define|create|declare)\s+a
+        |(?:for|while|if|else|try|catch|function|def|class|interface)\s+(?:in|syntax)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+# Current events / time-sensitive queries → SEMANTIC
+_CURRENT_EVENTS_PATTERN = re.compile(
+    r"""
+    (?:
+        today|tonight|right\s+now|now|latest|recent|current|live
+        |(?:latest|recent|current|live)\s+(?:news|events|updates|information|data|prices?|rates?|quotes?|scores?)
+        |what\s+(?:is|are|happened)\s+(?:today|right\s+now)
+        |2024|2025|2026|2027|2028|2029          # recent/future years
+        |yesterday|tomorrow|this\s+(?:week|month|year)
+        |real-time|real\s+time|realtime
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+# Real-time data queries (market, weather, news, sports, crypto)
+_REAL_TIME_DATA_PATTERN = re.compile(
+    r"""
+    (?:
+        (?:stock|crypto|bitcoin|ethereum|forex|currency|exchange|rate|weather|temperature|precipitation|news|sports?|game|match|score)
+        (?:\s+(?:price|rate|trend|forecast|today|now|live|current|update|data|quote))?
+        |(?:weather|temperature|rain|snow|wind|forecast)\s+(?:today|tonight|tomorrow|now|this\s+(?:week|weekend))
+        |(?:sports?|game|match|score|league)\s+(?:today|tonight|tomorrow|live|score|result|update)
+        |(?:news|headline|event|update|breaking)\s+(?:today|now|latest|recent)
+        |(?:cryptocurrency|crypto|coin|token|altcoin)\s+(?:price|trend|trading|market)
+        |(?:oil|gold|silver|copper|commodity)\s+(?:price|rate|trend|market)
+        |(?:forex|currency|exchange)\s+(?:rate|pair|trading)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+# Financial/market queries (needs current data)
+_FINANCIAL_PATTERN = re.compile(
+    r"""
+    (?:
+        (?:stock|crypto|bitcoin|ethereum|forex|currency|bond|commodity|gold|oil|silver|platinum|precious)\b
+        |(?:price|rate|valuation|dividend|ipo|market|trading|broker|exchange|nasdaq|nyse)\b
+        |(?:portfolio|investment|hedge|futures?|options?|etf|mutual\s+fund)\b
+        |(?:gdp|inflation|interest|unemployment|recession|economic|bull\s+market|bear\s+market)\b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+# Code implementation/libraries — need CODE retrieval
+_CODE_PATTERN = re.compile(
+    r"""
+    (?:
+        (?:example|sample|code|implementation|library|package|module|npm|pip|cargo)
+        (?:\s+of)?|\bhow\s+to\s+implement\b
+        |github|repository|npm\s+package|python\s+library
+        |(?:write|build|create)\s+(?:a|an|the)?\s*(?:api|server|client|function|class)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE
+)
+
+def _dynamic_intent_classifier(query: str) -> Optional[str]:
+    """Dynamic semantic intent detection (no LLM). Returns mode or None if ambiguous.
+    
+    Uses multi-layer pattern matching with priority ordering to classify queries accurately.
+    Returns: "PARAMETRIC" | "SEMANTIC" | "CODE" | None (for LLM fallback)
+    """
+    # LAYER 1: PARAMETRIC (no retrieval)
+    if _MATH_PATTERN.search(query):
+        return "PARAMETRIC"
+    if _DEFINITION_PATTERN.search(query) and not _CODE_PATTERN.search(query):
+        return "PARAMETRIC"
+    
+    # LAYER 2: SEMANTIC (must retrieve) — checked BEFORE CODE to prioritize real-time data
+    # Real-time data takes highest priority
+    if _REAL_TIME_DATA_PATTERN.search(query):
+        return "SEMANTIC"  # Market, weather, news, sports ALWAYS need current data
+    
+    if _FINANCIAL_PATTERN.search(query):
+        # Financial queries need retrieval unless asking pure conceptual question
+        if not _DEFINITION_PATTERN.search(query):
+            return "SEMANTIC"
+    
+    if _CURRENT_EVENTS_PATTERN.search(query):
+        return "SEMANTIC"
+    
+    # LAYER 3: CODE (code examples, implementations)
+    if _SYNTAX_PATTERN.search(query):
+        return "CODE"
+    if _CODE_PATTERN.search(query):
+        return "CODE"
+    
+    # Ambiguous — return None for LLM fallback
+    return None
+
+
+def _regex_fast_path(query: str) -> Optional[GateDecision]:
+    """Fast-path classification using regex patterns (0ms, no API call).
+    
+    Uses dynamic intent classifier for accurate multi-layer classification.
+    """
+    query_lower = query.lower()
+    
+    # Use dynamic intent classifier
+    intent = _dynamic_intent_classifier(query)
+    
+    if intent == "PARAMETRIC":
+        return GateDecision(
+            needs_retrieval=False,
+            mode="PARAMETRIC",
+            reason="parametric_regex",
+        )
+    
+    if intent == "SEMANTIC":
+        # Determine specific reason
+        if _REAL_TIME_DATA_PATTERN.search(query):
+            reason = "realtime_data_regex"
+        elif _FINANCIAL_PATTERN.search(query):
+            reason = "financial_regex"
+        else:
+            reason = "semantic_regex"
+        
+        return GateDecision(
+            needs_retrieval=True,
+            mode="SEMANTIC",
+            reason=reason,
+        )
+    
+    if intent == "CODE":
+        return GateDecision(
+            needs_retrieval=True,
+            mode="CODE",
+            reason="code_regex",
+        )
+
+    # No fast-path match — fall through to LLM
+    return None
+
 _LLM_SYSTEM_TEMPLATE = """Decide how to route a user query. Respond with ONLY a JSON object:
 
 - "needs_retrieval": true/false
 - "mode": "PARAMETRIC" | "SEMANTIC" | "CODE" | "HYBRID" | "SKILL" | "URL_DIRECT"
 - "reason": one short phrase
 
-Classification rules:
-- PARAMETRIC: Standard algorithms, language syntax, common patterns, math/logic. LLM already knows these.
-- SEMANTIC: Needs conceptual explanation, documentation, research papers, current events.
-- CODE: Needs real-world code examples, niche libraries, domain-specific tools.
-- HYBRID: Needs both code examples AND conceptual grounding.
-- SKILL: User wants to CREATE/GENERATE a deliverable (presentation, report, website, analysis, review). Available skills: {skills}
-- URL_DIRECT: User provided a specific URL to fetch/scrape/read.
+Classification rules (PRIORITY ORDER):
 
-IMPORTANT: If the user asks to "create", "make", "build", "generate" a document/presentation/website/report — use SKILL mode."""
+1. SKILL MODE (user wants to CREATE/GENERATE something):
+   - Examples: "create a presentation", "build a website", "generate a report", "make a deck"
+   - Available skills: {skills}
+
+2. URL_DIRECT (user provided a specific URL):
+   - Fetch and analyze the URL directly
+
+3. SEMANTIC MODE (needs current/real-time information or conceptual research):
+   - Real-time data: stock prices, crypto rates, weather, news, sports scores, breaking events
+   - Financial queries: "bitcoin price", "S&P 500 today", "oil prices", "forex rates", "interest rates"
+   - Market data: commodities, stocks, forex, crypto, ETFs, bonds
+   - Current events: "what happened today", "latest news", "breaking news", "recent events"
+   - Time-sensitive: queries with "live", "today", "current", "latest", "recent", "now"
+   - Research needs: articles, papers, explanations of complex topics
+   - Examples:
+     * "cdsl live stock price" → SEMANTIC (market data needs real-time lookup)
+     * "bitcoin price" → SEMANTIC (volatile, needs current rates)
+     * "weather today" → SEMANTIC (current forecast needed)
+     * "latest tech news" → SEMANTIC (needs current sources)
+
+4. PARAMETRIC MODE (LLM already knows this, no retrieval needed):
+   - Established concepts: "what is machine learning", "define recursion", "explain photosynthesis"
+   - Math/logic: arithmetic, basic algorithms, language fundamentals
+   - Historical facts with stable knowledge: "who was Einstein", "what caused WW2"
+   - Note: Use PARAMETRIC ONLY for things that don't change. If it involves current data, prices, trends, or recent events, use SEMANTIC
+
+5. CODE MODE (needs code examples and implementation):
+   - Programming syntax: "how to write a loop", "javascript async/await"
+   - Libraries/frameworks: "python numpy example", "react hooks tutorial"
+   - Real-world implementation: "github ssh setup", "build a REST API"
+   - Code patterns: "design patterns", "optimization techniques"
+
+6. HYBRID MODE (needs both code AND conceptual grounding):
+   - Example: "implement OAuth2 with S256" (needs BOTH concepts AND working code)
+
+CRITICAL: 
+- If ANY query involves real-time data, current prices, live markets, recent events, or "today/now" → use SEMANTIC
+- If query mentions "price", "rate", "stock", "crypto", "market", "live", "current" → likely SEMANTIC
+- Default to retrieval when uncertain (fail toward search, not hallucination)
+"""
 
 
 def _build_llm_prompt() -> str:
@@ -77,8 +290,16 @@ async def entry_gate(
     *,
     client: Optional[NIMClient] = None,
     cache: Optional[LLMCache] = None,
+    use_groq_for_semantic: bool = True,
 ) -> GateDecision:
-    """Classify query complexity. Uses URL/Skill fast-paths, then LLM semantic routing."""
+    """
+    Classify query complexity. Uses fast-paths in order:
+    1. URL detection (most specific)
+    2. Skill matching (user wants deliverable)
+    3. Regex patterns (math, definitions, current events)
+    4. Groq fast semantic classification (cheap, non-thinking)
+    5. NIM LLM fallback (expensive, for truly ambiguous cases)
+    """
 
     # ── URL direct fast-path (FIRST — most specific) ──
     url_match = _URL_PATTERN.search(query)
@@ -103,29 +324,24 @@ async def entry_gate(
     except Exception as e:
         logger.debug("Skill matching failed: %s", e)
 
-    # ── LLM fallback for ambiguous queries (dynamic, not hardcoded) ──
+    # ── Regex fast-paths (0ms, no API call) ──
+    regex_decision = _regex_fast_path(query)
+    if regex_decision:
+        return regex_decision
+
+    # ── Groq fast semantic classification (cheap, non-thinking) ──
     client = client or get_client()
     cache = cache or get_llm_cache()
 
-    system_prompt = _build_llm_prompt()
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": query},
-    ]
+    if use_groq_for_semantic and client._cfg.groq_api_keys:
+        try:
+            return await _classify_via_groq(query, client, cache)
+        except Exception as e:
+            logger.debug("Groq classification failed: %s, falling back to NIM", e)
 
-    # Check cache
-    cached = cache.get(query, "entry_gate", system_prompt)
-    if cached:
-        parsed = _parse(cached)
-        return _to_decision(parsed)
-
+    # ── NIM LLM fallback for truly ambiguous queries ──
     try:
-        raw = await client.chat_fast(
-            messages, temperature=0.0, response_format_json=True, max_tokens=100,
-        )
-        cache.set(query, "entry_gate", raw, system_prompt)
-        parsed = _parse(raw)
-        return _to_decision(parsed)
+        return await _classify_via_nim(query, client, cache)
     except Exception as e:
         logger.warning("Entry gate LLM failed: %s, defaulting to retrieval", e)
         return GateDecision(
@@ -151,3 +367,61 @@ def _to_decision(parsed: dict) -> GateDecision:
         mode=mode,
         reason=parsed.get("reason", ""),
     )
+
+
+async def _classify_via_groq(
+    query: str,
+    client: NIMClient,
+    cache: LLMCache,
+) -> GateDecision:
+    """Fast semantic classification via Groq (cheap, non-thinking LLM)."""
+    system_prompt = _build_llm_prompt()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": query},
+    ]
+
+    # Check cache first
+    cached = cache.get(query, "entry_gate_groq", system_prompt)
+    if cached:
+        parsed = _parse(cached)
+        return _to_decision(parsed)
+
+    try:
+        # Use Groq worker for fast, cheap classification
+        raw = await client.chat_worker(
+            messages, temperature=0.0, response_format_json=True, max_tokens=100,
+        )
+        cache.set(query, "entry_gate_groq", raw, system_prompt)
+        parsed = _parse(raw)
+        return _to_decision(parsed)
+    except Exception as e:
+        logger.debug("Groq classification failed: %s", e)
+        raise
+
+
+async def _classify_via_nim(
+    query: str,
+    client: NIMClient,
+    cache: LLMCache,
+) -> GateDecision:
+    """Fallback semantic classification via NVIDIA NIM (expensive, for ambiguous cases)."""
+    system_prompt = _build_llm_prompt()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": query},
+    ]
+
+    # Check cache
+    cached = cache.get(query, "entry_gate_nim", system_prompt)
+    if cached:
+        parsed = _parse(cached)
+        return _to_decision(parsed)
+
+    # Use NIM fast chat (shorter timeout)
+    raw = await client.chat_fast(
+        messages, temperature=0.0, response_format_json=True, max_tokens=100,
+    )
+    cache.set(query, "entry_gate_nim", raw, system_prompt)
+    parsed = _parse(raw)
+    return _to_decision(parsed)

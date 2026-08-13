@@ -69,10 +69,10 @@ class NIMSettings:
     # Per-key concurrency semaphore slots
     per_key_concurrency: int = 5
 
-    # Timeouts (seconds)
-    chat_timeout: float = field(default_factory=lambda: float(_env("NIM_CHAT_TIMEOUT", "30.0")))
-    fast_timeout: float = field(default_factory=lambda: float(_env("NIM_FAST_TIMEOUT", "5.0")))
-    embed_timeout: float = field(default_factory=lambda: float(_env("NIM_EMBED_TIMEOUT", "20.0")))
+    # Timeouts (seconds) — optimized for fast fallback when endpoints fail
+    chat_timeout: float = field(default_factory=lambda: float(_env("NIM_CHAT_TIMEOUT", "25.0")))
+    fast_timeout: float = field(default_factory=lambda: float(_env("NIM_FAST_TIMEOUT", "4.0")))
+    embed_timeout: float = field(default_factory=lambda: float(_env("NIM_EMBED_TIMEOUT", "10.0")))
     stream_timeout: float = field(default_factory=lambda: float(_env("NIM_STREAM_TIMEOUT", "60.0")))
 
     # Retry config
@@ -91,8 +91,8 @@ class BraveSettings:
 
     api_key: str = field(default_factory=lambda: _env("BRAVE_API_KEY", ""))
     base_url: str = "https://api.search.brave.com/res/v1/web/search"
-    timeout: float = 8.0
-    max_results: int = 8
+    timeout: float = field(default_factory=lambda: float(_env("BRAVE_TIMEOUT", "8.0")))
+    max_results: int = field(default_factory=lambda: int(_env("BRAVE_MAX_RESULTS", "8")))
 
 
 @dataclass
@@ -100,8 +100,8 @@ class SearchSettings:
     """DuckDuckGo fallback when Brave isn't configured."""
 
     ddg_url: str = "https://lite.duckduckgo.com/lite/"
-    timeout: float = 10.0
-    max_results: int = 8
+    timeout: float = field(default_factory=lambda: float(_env("DDG_TIMEOUT", "10.0")))
+    max_results: int = field(default_factory=lambda: int(_env("DDG_MAX_RESULTS", "8")))
 
 
 @dataclass
@@ -112,7 +112,8 @@ class SerpAPISettings:
     api_keys: list[str] = field(default_factory=lambda: _env_list("SERPAPI_KEY"))
     base_url: str = "https://serpapi.com/search"
     engine: str = "google"
-    timeout: float = 10.0
+    timeout: float = field(default_factory=lambda: float(_env("SERPAPI_TIMEOUT", "10.0")))
+    max_results: int = field(default_factory=lambda: int(_env("SERPAPI_MAX_RESULTS", "8")))
 
 
 @dataclass

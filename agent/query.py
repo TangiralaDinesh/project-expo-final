@@ -82,23 +82,7 @@ async def run_query(
     t0 = time.time()
     client = client or get_client()
 
-    # ── Semantic cache check ──
-    sem_cache = get_semantic_cache()
-    try:
-        query_vec = await embed_query(query, client=client)
-        cached = sem_cache.get(query_vec)
-        if cached:
-            return QueryResult(
-                answer=cached.get("answer", ""),
-                learnings=cached.get("learnings", []),
-                source_urls=cached.get("source_urls", []),
-                timing_ms=(time.time() - t0) * 1000,
-                from_cache=True,
-            )
-    except Exception:
-        query_vec = []
-
-    # ── Stage 1: Entry gate + Clarify (parallel) ──
+    # ── Stage 1: Entry gate + Clarify (parallel) ── [BEFORE semantic cache for fast routing]
     gate_task = entry_gate(query, client=client)
     clarify_task = generate_clarifying_question(
         query, client=client, memory_context=memory_context,
@@ -112,6 +96,26 @@ async def run_query(
         gate_result = GateDecision(needs_retrieval=True, mode="SEMANTIC", reason="gate_error")
     if isinstance(clarify_result, Exception):
         clarify_result = ClarifyDecision(should_ask=False, question="", depends_on_search_target=False)
+
+    # ── Semantic cache check (only for retrieval queries) ──
+    # Moved AFTER entry_gate to avoid unnecessary API calls for PARAMETRIC queries
+    query_vec = []
+    sem_cache = get_semantic_cache()
+    if gate_result.needs_retrieval:
+        try:
+            query_vec = await embed_query(query, client=client)
+            cached = sem_cache.get(query_vec)
+            if cached:
+                return QueryResult(
+                    answer=cached.get("answer", ""),
+                    learnings=cached.get("learnings", []),
+                    source_urls=cached.get("source_urls", []),
+                    timing_ms=(time.time() - t0) * 1000,
+                    from_cache=True,
+                    gate_decision=gate_result,
+                )
+        except Exception:
+            query_vec = []
 
     # ── Thinking profile (adapts to prompt + user history) ──
     profile = get_thinking_profile(gate_result.mode, query, effort_bias)
@@ -247,10 +251,32 @@ async def run_query(
             effective_query, client=client,
             prompt_specificity=profile.prompt_specificity,
         )
-        answer = (
-            "⚠️ Note: Live search returned limited results. This answer is based on "
-            "general knowledge and may not reflect the most current information.\n\n" + answer
-        )
+        
+        # Provide context-aware disclaimer based on gate decision
+        if gate_result.mode == "SEMANTIC" and gate_result.needs_retrieval:
+            # Search was attempted but returned nothing
+            if "realtime_data" in gate_result.reason or "financial" in gate_result.reason or "current_events" in gate_result.reason:
+                answer = (
+                    "⚠️ Note: Real-time data search returned limited results. "
+                    "This answer is based on general knowledge and may not reflect "
+                    "the most current information.\n\n" + answer
+                )
+            else:
+                answer = (
+                    "⚠️ Note: Search returned limited results. This answer is based on "
+                    "general knowledge and may not reflect the latest information.\n\n" + answer
+                )
+        elif gate_result.mode == "CODE" and gate_result.needs_retrieval:
+            answer = (
+                "⚠️ Note: Code examples search returned limited results. "
+                "This answer is based on general patterns and may need verification.\n\n" + answer
+            )
+        else:
+            # PARAMETRIC mode or fallback
+            answer = (
+                "⚠️ Note: Unable to retrieve additional information. "
+                "This answer is based on general knowledge.\n\n" + answer
+            )
 
     result = QueryResult(
         answer=answer,

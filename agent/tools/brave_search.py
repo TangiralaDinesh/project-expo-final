@@ -31,6 +31,15 @@ from ..config.budgets import MAX_SEARCH_RESULTS
 logger = logging.getLogger(__name__)
 
 
+def _extract_result_url(item) -> str:
+    """Return URL from either a SearchResult dataclass or a dict-like payload."""
+    if hasattr(item, "url"):
+        return getattr(item, "url", "") or ""
+    if isinstance(item, dict):
+        return item.get("url", "") or ""
+    return ""
+
+
 @dataclass
 class SearchResult:
     """One search result with URL, title, snippet, and optional extras."""
@@ -126,11 +135,12 @@ async def brave_search(
                 elif isinstance(r, Exception):
                     logger.warning("Parallel search branch failed: %s", r)
                     
-            # Deduplicate by URL
+            # Deduplicate by URL across all providers while keeping
+            # SearchResult dataclass objects compatible with dict-based code.
             seen = set()
             unique_web = []
             for w in web_results:
-                url = w.get("url")
+                url = _extract_result_url(w)
                 if url and url not in seen:
                     seen.add(url)
                     unique_web.append(w)

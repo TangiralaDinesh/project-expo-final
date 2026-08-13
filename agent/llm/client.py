@@ -39,6 +39,41 @@ from ..config.budgets import (
 logger = logging.getLogger(__name__)
 
 
+class CircuitBreaker:
+    """Simple circuit breaker for failing endpoints.
+    
+    After N consecutive failures within a time window, fail fast without retrying.
+    Prevents cascading failures and timeout waste.
+    """
+    def __init__(self, failure_threshold: int = 2, reset_timeout_s: float = 60.0):
+        self._failures: dict[str, list[float]] = {}  # endpoint → list of failure timestamps
+        self._failure_threshold = failure_threshold
+        self._reset_timeout = reset_timeout_s
+    
+    def record_failure(self, endpoint: str):
+        """Record a failure for this endpoint."""
+        now = time.monotonic()
+        if endpoint not in self._failures:
+            self._failures[endpoint] = []
+        self._failures[endpoint].append(now)
+        # Clean up old failures outside the window
+        self._failures[endpoint] = [
+            ts for ts in self._failures[endpoint] 
+            if now - ts < self._reset_timeout
+        ]
+    
+    def is_open(self, endpoint: str) -> bool:
+        """Check if circuit is open (endpoint is failing, fail fast)."""
+        if endpoint not in self._failures:
+            return False
+        # If we have enough failures in the window, circuit is open
+        return len(self._failures[endpoint]) >= self._failure_threshold
+    
+    def reset(self, endpoint: str):
+        """Reset failure count for this endpoint."""
+        self._failures[endpoint] = []
+
+
 class NIMClient:
     """
     Async NVIDIA NIM client with multi-key support, connection pooling,
@@ -71,6 +106,9 @@ class NIMClient:
             k: asyncio.Semaphore(self._cfg.per_key_concurrency)
             for k in self._keys
         }
+        
+        # Circuit breaker for endpoint reliability (fail fast on service issues)
+        self._circuit_breaker = CircuitBreaker(failure_threshold=2, reset_timeout_s=60.0)
 
     # ----- Session management ------------------------------------------------
 
@@ -111,17 +149,30 @@ class NIMClient:
 
     # ----- Retry with exponential backoff ------------------------------------
 
-    async def _call_with_backoff(self, fn, max_retries: int = None):
-        """Call fn(), retry on transient HTTP errors with exponential backoff.
-        fn must be an async callable that raises on failure."""
+    async def _call_with_backoff(self, fn, max_retries: int = None, endpoint: str = "default"):
+        """
+        Call fn(), retry on transient HTTP errors with exponential backoff.
+        fn must be an async callable that raises on failure.
+        
+        Uses circuit breaker to fail fast if endpoint is known to be failing.
+        """
+        # Fast-fail if circuit is open (endpoint is down)
+        if self._circuit_breaker.is_open(endpoint):
+            logger.debug("Circuit breaker open for %s, failing fast", endpoint)
+            raise Exception(f"Circuit breaker open for {endpoint}")
+        
         retries = max_retries if max_retries is not None else self._cfg.max_retries
         last_exc = None
 
         for attempt in range(retries + 1):
             try:
-                return await fn()
+                result = await fn()
+                # Success — reset circuit breaker for this endpoint
+                self._circuit_breaker.reset(endpoint)
+                return result
             except aiohttp.ClientResponseError as e:
                 last_exc = e
+                self._circuit_breaker.record_failure(endpoint)
                 if e.status in (429, 500, 502, 503, 504) and attempt < retries:
                     wait = min(
                         self._cfg.backoff_base * (2 ** attempt),
@@ -136,6 +187,7 @@ class NIMClient:
                     raise
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_exc = e
+                self._circuit_breaker.record_failure(endpoint)
                 if attempt < retries:
                     wait = min(
                         self._cfg.backoff_base * (2 ** attempt),
@@ -193,7 +245,7 @@ class NIMClient:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"]
 
-        return await self._call_with_backoff(_do)
+        return await self._call_with_backoff(_do, endpoint="chat_completions")
 
     async def chat_fast(
         self,
@@ -223,7 +275,10 @@ class NIMClient:
         max_tokens: int = 1024,
         response_format_json: bool = False,
     ) -> str:
-        """Dedicated worker for non-thinking high-speed semantic tasks via Groq."""
+        """Dedicated worker for non-thinking high-speed semantic tasks via Groq.
+        
+        If Groq is down, fail fast and fall back to NIM to avoid cascading retries.
+        """
         # Pick random key from list, fallback to single key
         active_key = (
             random.choice(self._cfg.groq_api_keys)
@@ -261,7 +316,16 @@ class NIMClient:
                 data = await resp.json()
                 return data["choices"][0]["message"]["content"]
 
-        return await self._call_with_backoff(_do)
+        try:
+            # Try Groq with 1 retry max (fail fast, don't cascade)
+            return await self._call_with_backoff(_do, max_retries=1, endpoint="groq_worker")
+        except Exception as e:
+            # Groq failed, fall back to NIM chat_fast (already logged)
+            logger.debug("Groq worker failed: %s, falling back to NIM chat_fast", e)
+            return await self.chat_fast(
+                messages, model=model, temperature=temperature,
+                max_tokens=max_tokens, response_format_json=response_format_json
+            )
 
     # ----- Streaming chat ----------------------------------------------------
 
@@ -313,6 +377,22 @@ class NIMClient:
 
     # ----- Embeddings --------------------------------------------------------
 
+    @staticmethod
+    def _sanitize_for_embedding(text: str, min_length: int = 3) -> str:
+        """Ensure text meets minimum requirements for embedding API.
+        Prevents 400 Bad Request errors on very short or invalid text."""
+        # Strip whitespace
+        text = text.strip()
+        
+        # Minimum length requirement — pad short texts
+        if len(text) < min_length:
+            text = text + " " + ("_" * (min_length - len(text)))
+        
+        # Remove problematic characters (null bytes, etc)
+        text = text.replace("\x00", "")
+        
+        return text[:10000]  # Cap at 10k chars per embedding
+
     async def embed(
         self,
         texts: list[str],
@@ -321,13 +401,17 @@ class NIMClient:
         dim: int = EMBED_DIM,
     ) -> list[list[float]]:
         """Batch embedding with Matryoshka truncation + L2 re-normalization.
-        Processes in batches of EMBED_BATCH_SIZE, returns one vector per text."""
+        Processes in batches of EMBED_BATCH_SIZE, returns one vector per text.
+        Sanitizes texts to prevent API 400 errors."""
         if not texts:
             return []
 
+        # Sanitize all texts before sending to API
+        sanitized_texts = [self._sanitize_for_embedding(t) for t in texts]
+
         all_vectors: list[list[float]] = []
-        for i in range(0, len(texts), EMBED_BATCH_SIZE):
-            batch = texts[i : i + EMBED_BATCH_SIZE]
+        for i in range(0, len(sanitized_texts), EMBED_BATCH_SIZE):
+            batch = sanitized_texts[i : i + EMBED_BATCH_SIZE]
             vecs = await self._embed_batch(batch, input_type)
             all_vectors.extend(vecs)
 
@@ -360,7 +444,7 @@ class NIMClient:
                     ordered = sorted(data["data"], key=lambda d: d["index"])
                     return [d["embedding"] for d in ordered]
 
-        return await self._call_with_backoff(_do)
+        return await self._call_with_backoff(_do, endpoint="embeddings")
 
     @staticmethod
     def _normalize_vec(v: list[float], dim: int = EMBED_DIM) -> list[float]:
@@ -412,7 +496,7 @@ class NIMClient:
                     return results[:top_n]
 
         try:
-            return await self._call_with_backoff(_do, max_retries=1)
+            return await self._call_with_backoff(_do, max_retries=1, endpoint="ranking")
         except Exception:
             # Rerank API is optional — degrade gracefully
             logger.warning("NVIDIA rerank API failed, falling back to RRF only")

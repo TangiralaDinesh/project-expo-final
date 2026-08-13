@@ -18,8 +18,8 @@ FAN_OUT_MAX_SUBAGENTS = 8        # cap for mechanical, provably-independent unit
 DEFAULT_MAX_DEPTH = 3            # default recursion depth per query
 MAX_EXTENSIONS_PER_BRANCH = 1    # one-shot dynamic depth extension
 EXTENSION_INCREMENT = 1          # how much deeper one grant buys
-NODE_TIMEOUT_S = 8.0             # per-node hard timeout
-GLOBAL_BUDGET_S = 28.0           # whole tree must finish by this
+NODE_TIMEOUT_S = 6.0             # per-node hard timeout (reduced from 8s with circuit breaker)
+GLOBAL_BUDGET_S = 25.0           # whole tree must finish by this (reduced from 28s)
 MIN_TIME_MARGIN_S = 3.0          # required slack before global deadline to grant extension
 INFO_GAIN_THRESHOLD = 0.3        # minimum delta to justify another recursion level
 
