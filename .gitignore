@@ -5,6 +5,8 @@
 .env.test.local
 .env.production.local
 *.env
+.env
+*.env
 
 # Hardcoded credentials or keys
 *.pem
