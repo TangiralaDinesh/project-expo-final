@@ -60,6 +60,20 @@ class QueryResult:
     timing_ms: float = 0.0
     from_cache: bool = False
     prompt_specificity: str = "standard"
+    
+    # Tier 2: Progressive Revelation (zoom levels)
+    current_zoom_level: int = 0  # 0=overview, 1=focused, 2=comprehensive
+    zoom_options: dict = field(default_factory=dict)  # Zoom navigation options
+    can_zoom_in: bool = False
+    can_zoom_out: bool = False
+    
+    # Tier 3: Bayesian Branching
+    branching_options: list = field(default_factory=list)  # BranchingOption objects
+    branching_session_id: Optional[str] = None  # Track multi-turn branching
+    
+    # Tier 4: Code Execution (metadata)
+    code_executed: bool = False
+    code_execution_results: list = field(default_factory=list)
 
 
 @dataclass
@@ -79,8 +93,30 @@ async def run_query(
     client: Optional[NIMClient] = None,
     effort_bias: Optional[EffortBias] = None,
     satisfaction: Optional[SatisfactionTracker] = None,
+    zoom_level: int = 0,  # Tier 2: 0=overview, 1=focused, 2=comprehensive
+    branch_selection: Optional[int] = None,  # Tier 3: user selected branch index
+    branching_session_id: Optional[str] = None,  # Tier 3: resume branching session
+    use_code_execution: bool = False,  # Tier 4: enable code-based validation
 ) -> QueryResult:
-    """Non-streaming entry point."""
+    """
+    Non-streaming entry point with Tier 1-4 features.
+    
+    Args:
+        query: User's question
+        memory_context: Prior conversation context
+        fetch_fn: Function to fetch web content
+        code_tool_fn: Function for tool execution
+        client: LLM client
+        effort_bias: Effort/cost preferences
+        satisfaction: User satisfaction tracker (Tier 1)
+        zoom_level: Progressive revelation depth (Tier 2)
+        branch_selection: User's choice from branching options (Tier 3)
+        branching_session_id: Continue multi-turn branching (Tier 3)
+        use_code_execution: Enable code validation (Tier 4)
+    
+    Returns:
+        QueryResult with answer + metadata
+    """
     t0 = time.time()
     client = client or get_client()
 

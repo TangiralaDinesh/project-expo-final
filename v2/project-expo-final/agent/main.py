@@ -14,6 +14,8 @@ import sys
 
 import uvicorn
 
+logger = logging.getLogger(__name__)
+
 
 def setup_logging(debug: bool = False):
     level = logging.DEBUG if debug else logging.INFO
@@ -31,35 +33,44 @@ def setup_logging(debug: bool = False):
 async def run_test_query(query: str):
     """Run a single query through the full pipeline and print results."""
     from .query import run_query
+    from .llm.client import get_client
 
     print(f"\n{'='*60}")
     print(f"  Query: {query}")
     print(f"{'='*60}\n")
 
-    result = await run_query(query)
+    try:
+        result = await run_query(query)
 
-    print(f"\n{'─'*60}")
-    print(f"  Gate: {result.gate_decision.mode if result.gate_decision else 'N/A'}")
-    if result.clarify_decision and result.clarify_decision.should_ask:
-        print(f"  Clarify: {result.clarify_decision.question}")
-    print(f"  Sources: {len(result.source_urls)}")
-    print(f"  Learnings: {len(result.learnings)}")
-    print(f"  Time: {result.timing_ms:.0f}ms")
-    print(f"  Cached: {result.from_cache}")
-    print(f"{'─'*60}\n")
-    print(result.answer)
-    print(f"\n{'─'*60}")
+        print(f"\n{'─'*60}")
+        print(f"  Gate: {result.gate_decision.mode if result.gate_decision else 'N/A'}")
+        if result.clarify_decision and result.clarify_decision.should_ask:
+            print(f"  Clarify: {result.clarify_decision.question}")
+        print(f"  Sources: {len(result.source_urls)}")
+        print(f"  Learnings: {len(result.learnings)}")
+        print(f"  Time: {result.timing_ms:.0f}ms")
+        print(f"  Cached: {result.from_cache}")
+        print(f"{'─'*60}\n")
+        print(result.answer)
+        print(f"\n{'─'*60}")
 
-    if result.source_urls:
-        print("  Sources:")
-        for url in result.source_urls[:5]:
-            print(f"    • {url}")
+        if result.source_urls:
+            print("  Sources:")
+            for url in result.source_urls[:5]:
+                print(f"    • {url}")
 
-    print(f"{'='*60}\n")
-
-    # Cleanup
-    from .llm.client import get_client
-    await get_client().close()
+        print(f"{'='*60}\n")
+    except Exception as e:
+        print(f"\n{'─'*60}")
+        print(f"  ERROR: {type(e).__name__}: {e}")
+        print(f"{'─'*60}\n")
+        raise
+    finally:
+        # Cleanup - always close session, even on error
+        try:
+            await get_client().close()
+        except Exception as cleanup_err:
+            logger.exception(f"Error during client cleanup: {cleanup_err}")
 
 
 def main():

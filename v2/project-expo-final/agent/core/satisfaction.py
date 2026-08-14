@@ -41,6 +41,9 @@ _CORRECTION_WEIGHTS = {
     "style_preference": 0.3,     # minor preference mismatch
 }
 
+# ── Memory management ──
+MAX_CORRECTIONS_HISTORY = 100  # Keep recent only, prevent unbounded growth
+
 import json
 import urllib.request
 from ..config.settings import settings
@@ -218,6 +221,7 @@ class SatisfactionTracker:
         """Record a user correction for learning (Tier 1 feature).
         
         This becomes a CorrectionPattern that influences future thinking profiles.
+        Capped at MAX_CORRECTIONS_HISTORY to prevent unbounded memory growth.
         """
         from .types import CorrectionPattern
         
@@ -228,7 +232,13 @@ class SatisfactionTracker:
             timestamp=time.time(),
         )
         self.corrections.append(pattern)
+        
+        # Keep only recent corrections to prevent unbounded memory growth
+        if len(self.corrections) > MAX_CORRECTIONS_HISTORY:
+            self.corrections = self.corrections[-MAX_CORRECTIONS_HISTORY:]
+        
         logger.debug(f"Recorded correction: {correction_type} (severity={severity}, domain={domain})")
+
 
     def get_recent_corrections(
         self,

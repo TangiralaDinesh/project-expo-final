@@ -169,3 +169,62 @@ async def direct_answer_llm_stream(
         max_tokens=1024,
     ):
         yield delta
+
+
+# ── TIER 2: Zoom level support ──
+
+async def synthesis_at_zoom_level(
+    query: str,
+    learnings: list[Learning],
+    zoom_level: str = "overview",
+    *,
+    client: Optional[NIMClient] = None,
+) -> str:
+    """
+    Generate synthesis at a specific zoom level (Tier 2 feature).
+    
+    Zoom levels:
+    - "overview" (Level 0): ~300 tokens, high-level summary
+    - "focused" (Level 1): ~800 tokens, focused detail with examples
+    - "comprehensive" (Level 2): ~2000 tokens, full treatment
+    """
+    from .synthesis_levels import get_zoom_config, ZoomLevel
+    
+    if client is None:
+        client = get_client()
+    
+    # Map string to ZoomLevel enum
+    level_map = {
+        "overview": ZoomLevel.LEVEL_0,
+        "focused": ZoomLevel.LEVEL_1,
+        "comprehensive": ZoomLevel.LEVEL_2,
+    }
+    zoom = level_map.get(zoom_level, ZoomLevel.LEVEL_0)
+    config = get_zoom_config(zoom)
+    
+    # Build learnings block with source attribution
+    learnings_block = "\n".join(
+        f"- [{l.source}] {l.text}" if l.source else f"- {l.text}"
+        for l in learnings
+    )
+    
+    # Add zoom-level specific instructions to system prompt
+    zoom_prompt = f"{_SYSTEM_PROMPT}\n\n--- ZOOM LEVEL {config.level.value.upper()} ---\n{config.depth_instructions}"
+    
+    persona = build_persona_prompt("standard")
+    full_system = persona + "\n\n" + zoom_prompt
+    
+    answer = await client.chat(
+        [
+            {"role": "system", "content": full_system},
+            {
+                "role": "user",
+                "content": f"Query: {query}\n\nLearnings:\n{learnings_block}"
+            },
+        ],
+        temperature=0.3,
+        max_tokens=config.token_budget,
+    )
+    
+    return answer
+

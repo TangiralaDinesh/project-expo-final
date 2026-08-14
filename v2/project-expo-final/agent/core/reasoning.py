@@ -230,6 +230,7 @@ async def get_thinking_profile_with_history(
     3. Correction history (NEW - Tier 1 feature)
     4. Feature flags (NEW - Tier 1 control)
     """
+    from .observability import get_observability_tracker, MetricType
     
     # Start with base profile
     base_profile = get_thinking_profile(gate_mode, query)
@@ -240,9 +241,12 @@ async def get_thinking_profile_with_history(
     
     # Apply correction history if enabled
     applied_corrections = []
+    domain = _extract_domain(query)
+    tracker = get_observability_tracker()
+    
     if satisfaction_tracker and features_enabled.connectivity_enabled:
         corrections = satisfaction_tracker.get_recent_corrections(
-            domain_hint=_extract_domain(query),
+            domain_hint=domain,
             decay_days=7
         )
         
@@ -256,6 +260,12 @@ async def get_thinking_profile_with_history(
                 )
                 base_profile.uncertainty_tolerance = min(0.9, base_profile.uncertainty_tolerance + 0.1)
                 applied_corrections.append("increased_depth")
+                tracker.record_event(
+                    MetricType.THINKING_DEPTH_ADJUSTED,
+                    value=severity,
+                    domain=domain,
+                    adjustment="depth_increase"
+                )
             
             elif correction_type == "error_correction":
                 # More self-consistency checks
@@ -264,16 +274,35 @@ async def get_thinking_profile_with_history(
                     3
                 )
                 applied_corrections.append("increased_consistency")
+                tracker.record_event(
+                    MetricType.CORRECTION_APPLIED,
+                    value=severity,
+                    domain=domain,
+                    correction_type="error_correction"
+                )
             
             elif correction_type == "too_verbose":
                 # Less exploration
                 base_profile.use_multi_query_expansion = False
                 applied_corrections.append("reduced_expansion")
+                tracker.record_event(
+                    MetricType.CORRECTION_APPLIED,
+                    value=severity,
+                    domain=domain,
+                    correction_type="too_verbose"
+                )
             
             elif correction_type == "incomplete_work":
                 # More thorough
                 base_profile.budget_s = min(base_profile.budget_s * 1.3, 60)
                 applied_corrections.append("increased_budget")
+                tracker.record_event(
+                    MetricType.CORRECTION_APPLIED,
+                    value=severity,
+                    domain=domain,
+                    correction_type="incomplete_work"
+                )
+
     
     # Apply feature flags
     base_profile.branching_enabled = features_enabled.bayesian_branching_enabled
