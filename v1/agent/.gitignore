@@ -1,0 +1,18 @@
+# Ignore everything
+/*
+
+# But allow these
+!/agent/
+!/.gitignore
+!/github_researchtool.py
+!/_test_workflow.py
+!/_verify.py
+
+# Standard ignores
+__pycache__/
+*.pyc
+*.db
+.env
+.pytest_cache/
+node_modules/
+.DS_Store
