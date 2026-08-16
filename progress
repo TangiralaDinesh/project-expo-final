@@ -1,0 +1,44 @@
+to do / completed
+phase 1: ✅ COMPLETE
+  ✅ comparison query detection  [wired + tested]
+  ✅ modify orchestrator for parallel tasks  [decompose_task creates N parallel nodes]
+  ✅ phase 5: parallel state machine [ParallelStateCoordinator integrated into run_orchestrator]
+
+phase 2: ✅ COMPLETE
+  ✅ token adaptation + truncation recovery [_calculate_adaptive_max_tokens, _detect_truncation implemented]
+  ✅ progressive navigation wiring [zoom_level param passes through query.py → synthesis]
+
+phase 3: ✅ IN PROGRESS
+  ✅ speculative questions generation [agent/llm/speculative.py created with info-gain ranking]
+  ⏳ branching UI flow wiring [needs integration into query.py responses]
+
+phase 4: ⏳ PARTIAL
+  ⏳ code execution implementation [executor framework ready]
+  ⏳ tool registration [tool_registry.py exists, needs tool implementations]
+
+connectivity status:
+  ✅ query.py → run_orchestrator()
+  ✅ run_orchestrator() → decompose_task()
+  ✅ decompose_task() → ComparisonQueryDetector
+  ✅ orchestrator layer execution → ParallelStateCoordinator tracking
+  ✅ results collection → _collect_results()
+  ✅ synthesis.py → adaptive token limiting + truncation recovery
+  ✅ query.py → zoom_level parameter filtering + metadata
+
+recent enhancements:
+  ✅ synthesis.py: _calculate_adaptive_max_tokens() (1024-4096 based on complexity)
+  ✅ synthesis.py: _detect_truncation() (incomplete markup detection)
+  ✅ synthesis.py: Retry logic on truncation with higher token limits
+  ✅ query.py: zoom_level filtering (Level 0: top 3, Level 1: top 6, Level 2: all learnings)
+  ✅ query.py: can_zoom_in/can_zoom_out metadata tracking
+  ✅ agent/llm/speculative.py: generate_speculative_questions() with info-gain ranking
+  ✅ agent/llm/speculative.py: generate_simple_clarifying_questions() fallback
+
+test results:
+  ✅ "CDSL or EMVEE" → 3 parallel nodes (2 entity + 1 synthesis)
+  ✅ "React vs Vue" → 3 parallel nodes (2 entity + 1 synthesis)
+  ✅ Standard queries → 1 node (no over-decomposition)
+  ✅ State coordinator ready for progress tracking
+  ✅ Token adaptation framework verified
+  ✅ Zoom level filtering implemented
+
