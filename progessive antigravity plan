@@ -1,0 +1,1510 @@
+Read memory
+
+Agent observability and enterprise readiness audit
+
+Search complete: Find observability and logging infrastructure
+
+Searched codebase for "logging setup tracing observability infrastructure telemetry metrics OTEL OpenTelemetry", 1 result
+
+Searched codebase for "structured logging log levels debug info warning error critical tracing", 1 result
+
+Searched for regex `OpenTelemetry|otlp|trace|metric|instrumentation`, 291 results
+
+No matches found. Your search pattern might be excluded completely by either the search.exclude settings or .*ignore files.
+If you believe that it should have results, you can check into the .*ignore files and the exclude setting (here are some excluded patterns for reference:[**/node_modules,**/bower_components,**/*.code-search]).
+Then if you want to include those files you can call the tool again by setting "includeIgnoredFiles" to true.
+
+Searched for files matching `**/*logging*.{js,ts,py,go,java,rs,scala,cs}*`, no matches
+
+Searched for files matching `**/*tracing*.{js,ts,py,go,java,rs,scala,cs}*`, no matches
+
+Searched for files matching `**/*metric*.{js,ts,py,go,java,rs,scala,cs}*`, no matches
+
+Searched for regex `DEBUG|INFO|WARNING|ERROR|CRITICAL|log.*level|structured.*log`, 907 results
+
+Searched for regex `otel.*exporter|otel.*trace|otel.*metric|tracer|meter`, 310 results
+
+Searched for files matching `**/observability*.{js,ts,py,go,java,rs,scala,cs}*`, 2 matches
+
+Searched for files matching `**/observability*.{py,ts,js,go,java,rs,scala,cs}*`, 2 matches
+
+Searched for regex `OpenTelemetry|OTEL|trace|metric|instrumentation`, 291 results
+
+Searched for regex `get_observability_tracker|ObservabilityTracker`, 34 results
+
+Searched for regex `MetricType|MetricEvent`, 40 results
+
+Searched for files matching `**/queue_observability*.{py,ts,js,go,java,rs,scala,cs}*`, 1 match
+
+Searched for regex `log_wave_metrics|structured logging|JSON logging`, 3 results
+
+Searched for regex `DEBUG|INFO|WARNING|ERROR|CRITICAL`, 907 results
+
+Searched for files matching `**/telemetry*.{py,ts,js,go,java,rs,scala,cs}*`, no matches
+
+Read 
+
+Read 
+
+Searched for regex `log_queue_debug|log_wave_metrics|log_final_report`, 4 results
+
+Searched for files matching `**/queue_observability*.{py,ts,js,go,java,rs,scala,cs}*`, 1 match
+
+Searched for regex `structured logging|JSON logging|log level`, 2 results
+
+No matches found. Your search pattern might be excluded completely by either the search.exclude settings or .*ignore files.
+If you believe that it should have results, you can check into the .*ignore files and the exclude setting (here are some excluded patterns for reference:[**/node_modules,**/bower_components,**/*.code-search]).
+Then if you want to include those files you can call the tool again by setting "includeIgnoredFiles" to true.
+
+Searched for regex `tracer|meter|instrumentation`, 310 results
+
+Searched for files matching `**/observability*.py`, 2 matches
+
+Searched for text `get_observability_tracker`, 23 results
+
+Searched for text `MetricType`, 34 results
+
+Searched for files matching `**/test_*observability*.py`, no matches
+
+Read , lines 180 to 247
+
+Search complete: Identify deployment and infrastructure setup
+
+Searched codebase for "docker docker-compose kubernetes CI/CD pipeline deployment config environment setup build scripts containerization", 23 results
+
+Searched codebase for "Dockerfile container build image push registry", 28 results
+
+Searched codebase for "k8s deployment configuration environment variables secrets", 21 results
+
+Searched for files matching `**/*docker*`, no matches
+
+Searched for files matching `**/*docker-compose*`, no matches
+
+Searched for files matching `**/*kubernetes*`, no matches
+
+Searched for files matching `**/*ci*`, 3 matches
+
+Searched for files matching `**/*cd*`, no matches
+
+Searched for files matching `**/*deployment*`, no matches
+
+Searched for files matching `**/*env*`, 3 matches
+
+Searched for files matching `**/*build*`, 10 matches
+
+Searched for regex `docker|Docker`, 12 results
+
+No matches found. Your search pattern might be excluded completely by either the search.exclude settings or .*ignore files.
+If you believe that it should have results, you can check into the .*ignore files and the exclude setting (here are some excluded patterns for reference:[**/node_modules,**/bower_components,**/*.code-search]).
+Then if you want to include those files you can call the tool again by setting "includeIgnoredFiles" to true.
+
+Searched for regex `kubernetes|Kubernetes`, 3 results
+
+Searched for regex `CI|cd|pipeline|deployment|containerization`, 864 results
+
+Searched for files matching `**/*.yaml`, no matches
+
+Searched for files matching `**/*.yml`, no matches
+
+Searched for files matching `**/*.json`, 4 matches
+
+Searched for files matching `**/*.sh`, no matches
+
+Searched for files matching `**/*.md`, 64 matches
+
+Read , lines 140 to 320
+
+Read , lines 1 to 260
+
+Read , lines 80 to 220
+
+Read 
+
+Read , lines 1 to 260
+
+Read 
+
+Read , lines 320 to 420
+
+Read , lines 470 to 540
+
+Read 
+
+Read , lines 140 to 188
+
+Read , lines 80 to 160
+
+Read , lines 730 to 798
+
+Read , lines 140 to 220
+
+Read , lines 250 to 320
+
+Read , lines 60 to 120
+
+Read , lines 260 to 275
+
+Read , lines 310 to 328
+
+Read , lines 10 to 180
+
+Read , lines 30 to 47
+
+Read , lines 240 to 268
+
+Read , lines 1 to 220
+
+Search complete: Find gap-scanning and domain-awareness mechanisms
+
+Searched codebase for "gap detection missing concept tracking satisfaction tracker uncertainty estimation anomaly detection proactive validation", 19 results
+
+Searched codebase for "track what concepts are missing from current understanding or monitoring", 21 results
+
+Searched codebase for "estimate uncertainty of model predictions or monitoring coverage", 30 results
+
+Searched for regex `gap.*detection|missing.*concept|anomaly.*detection|uncertainty.*estimation`, 17 results
+
+Searched for files matching `**/*gap*.{js,ts,py,java,go,rs,rs,scala,swift}`, no matches
+
+Searched for files matching `**/*satisfaction*.{js,ts,py,java,go,rs,rs,scala,swift}`, 2 matches
+
+Searched for files matching `**/*uncertainty*.{js,ts,py,java,go,rs,rs,scala,swift}`, no matches
+
+Searched for regex `proactive.*validation|proactive.*check|anomaly|gap`, 339 results
+
+Read 
+
+Read 
+
+Read , lines 36 to 270
+
+Read , lines 180 to 305
+
+Read , lines 30 to 160
+
+Read , lines 80 to 170
+
+Read , lines 100 to 245
+
+Read , lines 160 to 202
+
+Read , lines 420 to 420
+
+Search complete: Locate failure detection and validation mechanisms
+
+Searched codebase for "validation fact-checking self-consistency verification critique answer grading confidence scoring wrong answer detection", 14 results
+
+Searched codebase for "semantic validation wrong answer detection critical thinking verification", 20 results
+
+Searched codebase for "confidence scoring validation semantic fact checking consistency", 27 results
+
+Searched for files matching `**/*validation*`, 6 matches
+
+Searched for files matching `**/*fact*check*`, no matches
+
+Searched for files matching `**/*consistency*`, no matches
+
+Searched for files matching `**/*critique*`, 2 matches
+
+Searched for files matching `**/*grade*`, no matches
+
+Searched for regex `self-consistency|self_consistency`, 53 results
+
+Searched for regex `fact-check|fact_check|validate|verification`, 171 results
+
+Searched for regex `confidence.*score|confidence.*scoring|wrong.*answer|answer.*grading`, 37 results
+
+Searched for files matching `**/*semantic*`, 4 matches
+
+Searched for files matching `**/*answer*`, no matches
+
+Searched for regex `critique.*answer|answer.*critique|validation.*answer`, 3 results
+
+Searched for regex `semantic.*validation|semantic.*check|semantic.*verification`, 4 results
+
+Searched for files matching `**/*verify*`, 2 matches
+
+Read , lines 140 to 202
+
+Read 
+
+Read 
+
+Read , lines 33 to 154
+
+Read , lines 20 to 166
+
+Read , lines 250 to 320
+
+Read , lines 180 to 260
+
+Read , lines 60 to 91
+
+Read , lines 60 to 91
+
+Read 
+
+Read 
+
+Read , lines 60 to 105
+
+Read , lines 60 to 105
+
+Read , lines 20 to 160
+
+Read , lines 20 to 160
+
+Read 
+
+Search complete: Identify enterprise patterns and resilience mechanisms
+
+Searched codebase for "rate limiting request deduplication caching validation distributed state", 22 results
+
+Searched codebase for "circuit breaker retry logic timeout strategies resilience backoff", 24 results
+
+Searched for regex `rate.*limit|request.*dedup|cache.*validation|dedupe.*request`, 30 results
+
+Searched for regex `circuit.*breaker|breaker.*circuit|retry.*logic|timeout.*strategy|backoff`, 56 results
+
+Searched for files matching `**/*rate*.{js,ts,py,go,java,rb}*`, 4 matches
+
+Searched for files matching `**/*limit*.{js,ts,py,go,java,rb}*`, no matches
+
+Searched for files matching `**/*cache*.{js,ts,py,go,java,rb}*`, 10 matches
+
+Searched for regex `exponential.*backoff|jitter.*backoff|backoff.*retry|retry.*backoff`, 12 results
+
+Searched for regex `timeout.*strategy|timeout.*handling|resilience.*timeout`, 12 results
+
+Searched for files matching `**/*resilience*.{js,ts,py,go,java,rb}*`, no matches
+
+Searched for files matching `**/*cache*.{ts,js,py,go,java,rb}*`, 10 matches
+
+Searched for files matching `**/*circuit*.{ts,js,py,go,java,rb}*`, no matches
+
+Searched for files matching `**/*breaker*.{ts,js,py,go,java,rb}*`, no matches
+
+Searched for files matching `**/*retry*.{ts,js,py,go,java,rb}*`, no matches
+
+Searched for files matching `**/*backoff*.{ts,js,py,go,java,rb}*`, no matches
+
+Searched for files matching `**/*timeout*.{ts,js,py,go,java,rb}*`, no matches
+
+Searched for files matching `**/*rate*.{ts,js,py,go,java,rb}*`, 4 matches
+
+Searched for files matching `**/*dedup*.{ts,js,py,go,java,rb}*`, no matches
+
+Read , lines 70 to 140
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 110 to 220
+
+Read , lines 110 to 220
+
+Read , lines 70 to 140
+
+Read , lines 40 to 81
+
+Read , lines 510 to 570
+
+Read , lines 510 to 570
+
+Read , lines 40 to 81
+
+Search complete: Find instrumentation entry and exit points
+
+Searched codebase for "model call tool call retrieval event reasoning branch ranking step LLM call span context tracing point instrumentation", 24 results
+
+Searched for regex `model.*call|tool.*call|retrieval.*event|reasoning.*branch|ranking.*step|LLM.*call`, 396 results
+
+No matches found. Your search pattern might be excluded completely by either the search.exclude settings or .*ignore files.
+If you believe that it should have results, you can check into the .*ignore files and the exclude setting (here are some excluded patterns for reference:[**/node_modules,**/bower_components,**/*.code-search]).
+Then if you want to include those files you can call the tool again by setting "includeIgnoredFiles" to true.
+
+Searched for files matching `**/*tracing*.{js,ts,py,java,go,rs}`, no matches
+
+Searched for files matching `**/*instrument*.{js,ts,py,java,go,rs}`, no matches
+
+Searched for regex `OpenTelemetry|span.*begin|span.*end|trace.*id|span.*context`, 4 results
+
+Searched for files matching `**/*trace*.{js,ts,py,java,go,rs}`, no matches
+
+Searched for files matching `**/*span*.{js,ts,py,java,go,rs}`, no matches
+
+Searched for regex `trace.*id|span.*id|context.*span|set_span_in_context`, 8 results
+
+No matches found. Your search pattern might be excluded completely by either the search.exclude settings or .*ignore files.
+If you believe that it should have results, you can check into the .*ignore files and the exclude setting (here are some excluded patterns for reference:[**/node_modules,**/bower_components,**/*.code-search]).
+Then if you want to include those files you can call the tool again by setting "includeIgnoredFiles" to true.
+
+Searched for regex `OpenTelemetry|ot|trace_api`, 916 results
+
+Searched for files matching `**/agent/**/*trace*`, no matches
+
+Searched for files matching `**/jarvis/**/*trace*`, no matches
+
+Searched for regex `instrumentation|tracing|observability`, 144 results
+
+Searched for files matching `**/agent/core/observability*.py`, 2 matches
+
+Searched for files matching `**/agent/core/*trace*`, no matches
+
+Searched for files matching `**/jarvis/**/*trace*`, no matches
+
+Searched for regex `MetricType|MetricEvent|observability`, 172 results
+
+Searched for regex `tracing|trace`, 65 results
+
+Searched for files matching `**/*instrument*.{py,js,ts}`, no matches
+
+Searched for files matching `**/*tracer*.{py,js,ts}`, no matches
+
+Searched for text `span`, 6 results
+
+Read , lines 1 to 200
+
+Read , lines 1 to 150
+
+Read , lines 1 to 150
+
+Read , lines 1 to 100
+
+Read 
+
+Searched for files matching `**/*.{Dockerfile,docker-compose.yml,k8s,yaml,yml,tf}`, no matches
+
+Read 
+
+Read , lines 1 to 100
+
+Read , lines 1 to 120
+
+Searched for files matching `**/dockerfile, docker-compose, kubernetes, k8s, deployment, helm, github action, ci/cd, .env`, no matches
+
+Read , lines 100 to 200
+
+Read , lines 1 to 150
+
+Searched for regex `circuit.breaker|circuit_break|CIRCUIT|max_retries|backoff|timeout|try.*except|error.*handler|logger\.(error|warning|critical)` (`**/v2/project-expo-final/agent/**/*.py`), 272 results
+
+Searched for regex `log\.|logger|logging\.debug|logging\.info|logging\.warning|logging\.error|logging\.critical` (`**/v2/project-expo-final/agent/**/*.py`), 422 results
+
+Read 
+
+Searched for regex `console\.|logger|log\(|trace|span|metric|telemetry|observability` (`**/v2/mine-antigravity/**/*.ts`), 10 results
+
+Read , lines 1 to 100
+
+Read , lines 1 to 80
+
+Read memory
+
+Created memory file 
+
+Read 
+
+Analyzing your answers...
+
+I see — your focus is **reasoning and retrieval quality first**, with attention to **knowledge graphs and AI Mode architecture** patterns. Let me do a focused discovery on that, not deployment. 
+
+Knowledge graphs, retrieval quality, and reasoning patterns analysis
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Searched for regex `graph_store|knowledge_graph|entity|relationship|concept_hierarchy` (`project-expo` · `v2/project-expo-final/agent/**`), 212 results
+
+Read , lines 1 to 150
+
+Read , lines 1 to 150
+
+Read , lines 1 to 100
+
+Read , lines 1 to 150
+
+Read 
+
+Read , lines 1 to 150
+
+Read , lines 1 to 200
+
+Searched for regex `chunk|rerank|scoring|decision_llm|synthesis|crag|grading` (`project-expo` · `v2/project-expo-final/agent/**`), 197 results
+
+Read , lines 1 to 100
+
+Read , lines 1 to 100
+
+Read , lines 1 to 150
+
+Read , lines 1 to 150
+
+Read , lines 1 to 100
+
+Searched for regex `failure|bug|limitation|TODO|FIXME|limitation|known.*issue` (`project-expo` · `v2/project-expo-final/agent/**`), 182 results
+
+Read 
+
+Read , lines 1 to 100
+
+Searched for regex `assert.*fail|raises|error|mock.*error` (`project-expo` · `v2/project-expo-final/test_*.py`), 57 results
+
+Read , lines 1 to 150
+
+Read 
+
+Read , lines 1 to 100
+
+Read , lines 1 to 150
+
+Read memory
+
+Created memory file 
+
+Created memory file 
+
+Read 
+
+Created memory file 
+
+Updated memory file 
+
+Read memory 
+
+Created memory file 
+
+---
+
+## **PLAN: Reasoning + Retrieval Quality Integration**
+
+**Goal**: Adapt AI Mode architecture patterns to improve reasoning and retrieval quality.
+
+**Approach**: Three parallel implementation tracks with clear dependencies.
+
+---
+
+### **TRACK 1: Core Retrieval Quality** (Foundation)
+
+Foundation change: chunks are currently **4000 chars** (too large). AI Mode uses **375 words (~500 chars)** for better reranking signals.
+
+| Priority | Step | Why | Files | Impact |
+|----------|------|-----|-------|--------|
+| **P0** | Reduce chunk size 4000→500 chars | Foundation for all retrieval improvements; larger chunks dilute passage-level signals | `budgets.py:23`, `chunk.py` | +15-20% quality |
+| **P1** | Extract heading hierarchy; store in chunks (heading_path, section_depth, parent_context) | Chunks lose section context. Reranking can't use "under API Reference" as signal. | `types.py:44`, `chunk.py` | Section context for synthesis + reranking |
+| **P2** | Add LLM passage-level reranking (top-30 chunks: "How directly answers query?") | Current RRF is purely mechanical. AI Mode evaluates passage relevance via LLM. | `rerank.py:100` | +15-20% sufficiency accuracy |
+
+**Dependency**: P0 → P1 (must have smaller chunks to extract headings effectively) → P2 (needs heading context for informed ranking)
+
+---
+
+### **TRACK 2: Query Optimization** (Parallel)
+
+| Priority | Step | Why | Files | Impact |
+|----------|------|-----|-------|--------|
+| **P3** | Dedup similar subqueries (embed + cosine similarity clustering, threshold 0.85) | Current dimension-based fan-out duplicates (e.g., "Django features" + "Django best features") | `subquery_generator.py:140` | +20% token efficiency |
+| **P4** | Progressive Constraint Satisfaction (PCS): pilot phase (10%) → EIG scoring → select high-value queries | **Derived pattern** (not recombined). Flows from: "token budget limited" + "some queries inform value of others" = constraint satisfaction. Pilot 10%, score by information gain, execute top-N with remaining 90%. | `subquery_generator.py` | +30-40% efficiency on multi-entity queries |
+
+**Dependency**: P3 and P4 are independent; P4 extends P3.
+
+---
+
+### **TRACK 3: User Transparency** (Parallel)
+
+| Priority | Step | Why | Files | Impact |
+|----------|------|-----|-------|--------|
+| **P6** | Add inline citations (chunk_id → claim mapping, output with [1][2] markers) | Synthesis confident but untraceable. User can't verify. | `types.py`, `synthesis.py:40` | User verification + transparency |
+
+**Dependency**: None (can run anytime)
+
+---
+
+### **Verification Checklist**
+
+```
+[ ] P0: pytest test_integration_tiers_1_4.py (regression before/after)
+[ ] P1: Extract headings from 5 sample docs; verify hierarchy
+[ ] P2: Manual review of top-10 chunks pre/post LLM reranking
+[ ] P3: Log dedup rate (target 20-30% reduction)
+[ ] P4: Compare tokens-per-query on multi-entity questions
+[ ] P6: Spot-check 10 answers for [#] citation markers
+```
+
+---
+
+### **Timeline**
+
+```
+Week 1:    P0 + P1 (foundation)
+Week 1-2:  P3 + P6 parallel (independent)
+Week 2:    P2 (LLM reranking, after P0-P1 stable)
+Week 2-3:  P4 (PCS, extends P3)
+Future:    Entity disambiguation via graph (optional)
+```
+
+---
+
+### **Why This Works**
+
+| Aspect | Current | AI Mode | This Plan |
+|--------|---------|---------|-----------|
+| Chunking | 4000 chars, no hierarchy | 375 words + heading context | P0-P1: 500 chars + hierarchy |
+| Reranking | RRF only (dense+sparse fusion) | LLM passage evaluation | P2: RRF + LLM (0.7+0.3 blend) |
+| Query fan-out | Dimension-driven, with dupes | Semantic variants (no dupes) | P3: Dedup dimension variants |
+| Query prioritization | All dimensions equal | Adaptive (importance-based) | P4: EIG scoring (derived pattern) |
+| Transparency | Silent | Cited | P6: Inline citations |
+
+**Strength hybrid**: Keep agent's reasoning (decomposition, entity tracking, pivoting). Add AI Mode's retrieval quality (hierarchy, passage evaluation, transparency). Neither alone is sufficient; together = stronger system.
+
+**P4 (PCS) is genuinely derived**, not recombined:
+- Constraint: "Limited token budget + decomposition into subqueries + some queries inform others"  
+- Solution: Pilot phase → information gain scoring → selection
+- Not from existing literature; flows from problem structure
+- Represents pattern invention, not recombination
+
+---
+
+**Ready to implement?** All files identified, dependencies mapped, verification tests defined.
+
+
+
+I've completed a thorough discovery of the agent system and created a comprehensive analysis. Here's the scannable summary:
+
+---
+
+## **AI Mode Pattern Analysis: Current State & Opportunities**
+
+### **TL;DR**
+The system has sophisticated *reasoning infrastructure* (decomposition, entity tracking, pivoting) but **missing key AI Mode retrieval patterns**. It has pieces but they're not orchestrated. Biggest gaps:
+1. **No hierarchical chunking** (4000-char chunks vs AI Mode's 375-word chunks with heading context)
+2. **Query fan-out is dimension-aware, not semantic-variant-aware** (different approach, not worse)
+3. **Reranking uses RRF fusion, not LLM passage evaluation**
+4. **Synthesis lacks reasoning transparency/attribution**
+
+---
+
+### **1. KNOWLEDGE GRAPH** ✅ Implemented (Tier 1)
+- **Where**: [graph_store.py](v2/project-expo-final/agent/knowledge/graph_store.py), [graph_rag.py](v2/project-expo-final/agent/knowledge/graph_rag.py)
+- **What works**: Triple storage, entity extraction, N-hop traversal, merge with vector search
+- **Gaps**:
+  - ❌ No concept hierarchies ("subclass_of", "parent_of")
+  - ❌ No temporal facts
+  - ❌ Not used for disambiguation (only if query seems "relationship-heavy")
+  - ❌ All edges equally weighted
+- **Opportunity**: Use graph centrality to detect ambiguous queries early (→ "Did you mean Apple Inc. or apple fruit?")
+
+---
+
+### **2. QUERY FAN-OUT** ⚠️ Partial (Dimension-Driven, Not Semantic Variants)
+- **Where**: [subquery_generator.py](v2/project-expo-final/agent/core/subquery_generator.py), [intent_classifier.py](v2/project-expo-final/agent/core/intent_classifier.py)
+- **What works**: Organizes comparison queries by decision dimensions (price, features, support, adoption)
+- **Gap**: Doesn't generate **semantic variants**
+  - AI Mode: "OAuth2 PKCE" → ["OAuth2 code verifier", "PKCE S256", "authorization code flow"]
+  - Current: "CDSL" → ["CDSL price", "CDSL features"] (dimensions, not synonyms)
+- **Gaps**:
+  - ❌ No multi-query expansion within dimensions (no paraphrases)
+  - ❌ No dedup—redundant subqueries both execute
+  - ❌ Dimensions hardcoded; doesn't ask "which factors matter to you?"
+- **Opportunity**: Add semantic variant generation + pilot phase with EIG scoring to prioritize high-value subqueries
+
+---
+
+### **3. CHUNKING & HIERARCHY** ⚠️ Basic (No Heading Context)
+- **Where**: [chunk.py](v2/project-expo-final/agent/blocks/semantic/chunk.py)
+- **Current**: 4000-char chunks, sentence-boundary aware, 10% overlap
+- **Gaps**:
+  - ❌ **No heading hierarchy** — chunk doesn't know it's under "## API Reference"
+  - ❌ **Too large** (4000 chars ≈ 1000 words vs AI Mode's 375 words)
+  - ❌ No parent document context
+  - ❌ Reranking can't use "section relevance" as signal
+- **Consequence**: Passage-level reranking ineffective; synthesis loses context
+- **Opportunity**: (1) Reduce to 500 chars, (2) extract heading hierarchy, (3) store as chunk metadata
+
+---
+
+### **4. PASSAGE-LEVEL RERANKING** ⚠️ Hybrid (No LLM Evaluation)
+- **Where**: [rerank.py](v2/project-expo-final/agent/blocks/semantic/rerank.py)
+- **What works**: RRF (Reciprocal Rank Fusion) combining BM25 + cosine similarity
+- **Gaps**:
+  - ❌ No **LLM passage evaluation** — AI Mode: "does this chunk directly answer the query?" vs "tangential"
+  - ❌ No pairwise comparison ("Chunk A or B better answers this?")
+  - ❌ No cross-chunk consistency check ("do these contradict?")
+- **When used**: Post-retrieval, not per-chunk (gated by recursion depth)
+- **Opportunity**: Add LLM scoring stage for top-30 chunks to evaluate relevance/quality directly
+
+---
+
+### **5. REASONING SYNTHESIS** ⚠️ Partial (No Attribution)
+- **Where**: [synthesis.py](v2/project-expo-final/agent/llm/synthesis.py), [pivot.py](v2/project-expo-final/agent/core/pivot.py)
+- **What works**: 
+  - Narrative structure (not bullet points)
+  - Redundancy elimination (no DOB + age together)
+  - Token-aware output
+  - Pivot loop for hypothesis-driven retries
+- **Gaps**:
+  - ❌ No reasoning path transparency — user doesn't see which chunks → which claims
+  - ❌ No inline citations [1][2] — system confident, doesn't mark sources
+  - ❌ No uncertainty quantification
+  - ❌ Synthesis progress not visible
+- **Opportunity**: Add chunk-to-claim mapping + inline citation system
+
+---
+
+### **6. FAILURE MODES** (Documented in System)
+
+| Failure | Root Cause | Location |
+|---------|-----------|----------|
+| **Entity imbalance** | One entity explored deeply, other shallow | [decision.py#L70](v2/project-expo-final/agent/blocks/semantic/decision.py#L70) tracks but doesn't always fix |
+| **Sycophantic sufficiency** | LLM says "enough" when shallow | Mitigated: dual-call anti-sycophancy |
+| **Chunk dilution** | 4000-char chunks mix multiple concepts | [budgets.py#L23](v2/project-expo-final/agent/config/budgets.py#L23) |
+| **Circuit breaker fragility** | Fails after 3 retrieval errors | [orchestrator.py#L30](v2/project-expo-final/agent/orchestrator/orchestrator.py#L30) |
+| **No heading context** | Synthesis loses section info | [chunk.py](v2/project-expo-final/agent/blocks/semantic/chunk.py) doesn't store parent section |
+| **Token cutoff** | Synthesis truncated to 1024 tokens | ✅ Fixed in [synthesis.py#L75-L100](v2/project-expo-final/agent/llm/synthesis.py#L75-L100) |
+| **Query fan-out no-dedup** | Similar subqueries both execute | [subquery_generator.py#L140](v2/project-expo-final/agent/core/subquery_generator.py#L140) |
+
+---
+
+### **7. NEW DERIVED PATTERNS** (Not Recombinations)
+
+**Pattern 1: Progressive Constraint Satisfaction for Query Expansion**
+- **Insight**: Query expansion itself is an optimization problem
+- **Algorithm**: Pilot phase (10% budget) → EIG scoring → select high-value queries
+- **Why derived**: Flows from "limited token budget + user attention" constraint
+- **Effort**: 2-3 hours, reuses existing subquery_generator
+
+**Pattern 2: Confidence Decay Network for Disambiguation**
+- **Insight**: Ambiguous entities detectable via mention co-occurrence distance in graph
+- **Algorithm**: Mention decay network + shortest-path filtering
+- **Why derived**: Flows from "graph exists but not used for disambiguation"
+- **Effort**: 2-3 hours, reuses GraphStore structure
+
+**Pattern 3: Hybrid Chunk Materialization (Eager + Lazy)**
+- **Insight**: Most doc chunks never retrieved; lazy-chunk top-k sections to save ingest time
+- **Algorithm**: Coarse sections at ingest (fast) → fine chunks at retrieval (on-demand)
+- **Why derived**: Flows from "ingest speed + retrieval latency tradeoff"
+- **Effort**: 2-3 hours, extends existing chunking
+
+---
+
+### **8. DEPENDENCY GRAPH** (What Blocks What)
+
+```
+CRITICAL PATH:
+  1. Reduce chunk size (4000→500) — foundation
+  2. Extract heading hierarchy — requires #1
+  3. LLM passage reranking — requires #1-2
+
+PARALLEL TRACK A (Query Optimization):
+  4. Query fan-out dedup — no dependencies
+  5. Progressive constraint satisfaction — extends #4
+
+PARALLEL TRACK B (Attribution):
+  6. Chunk-to-claim mapping — no dependencies
+  7. Inline citations — requires #6
+
+OPTIONAL:
+  8. Entity disambiguation via graph — no dependencies
+  9. Concept hierarchy extraction — no dependencies
+```
+
+---
+
+### **9. PRIORITIZED ROADMAP**
+
+| Tier | Priority | What | Effort | Impact | Why First |
+|------|----------|------|--------|--------|-----------|
+| **1** | **P0** | Chunk size 4000→500 | Med | Unlocks all retrieval improvements | Foundation |
+| | **P1** | Heading hierarchy extraction | Low-Med | Section context for reranking | Depends on P0 |
+| | **P2** | LLM passage-level reranking | Med | +15-20% sufficiency accuracy | Depends on P0-P1 |
+| **2** | **P3** | Query fan-out dedup | Low | +20% token efficiency | Immediate win |
+| | **P4** | Progressive constraint satisfaction | Med | +30-40% efficiency on complex queries | Extends P3 |
+| **3** | **P6** | Inline citation system | Low-Med | User verification + transparency | UX enhancement |
+| **4** | **P9** | Entity disambiguation via graph | Med | Better edge cases | Specialized |
+
+---
+
+### **10. CONCRETE FILE CHANGES**
+
+**P0 (Chunk size)**: [budgets.py#L23](v2/project-expo-final/agent/config/budgets.py#L23) (4000→500), [chunk.py](v2/project-expo-final/agent/blocks/semantic/chunk.py)  
+**P1 (Heading hierarchy)**: [types.py](v2/project-expo-final/agent/blocks/semantic/types.py#L44) (add heading fields), [chunk.py](v2/project-expo-final/agent/blocks/semantic/chunk.py) (extract headers)  
+**P2 (LLM reranking)**: [rerank.py](v2/project-expo-final/agent/blocks/semantic/rerank.py#L100) (add LLM stage)  
+**P3 (Query dedup)**: [subquery_generator.py](v2/project-expo-final/agent/core/subquery_generator.py#L140) (embed + similarity)  
+**P6 (Citations)**: [types.py](v2/project-expo-final/agent/blocks/semantic/types.py#L44) (add citation_id), [synthesis.py](v2/project-expo-final/agent/llm/synthesis.py#L40) (track source mapping)
+
+---
+
+### **Key Insight**
+
+**This system's strength**: Structured reasoning (decomposition, entity tracking, branching)  
+**AI Mode's strength**: Retrieval quality (semantic variants, passage evaluation, chunk context)  
+**Recommendation**: Start with retrieval improvements (P0-P2) to raise the floor, then layer reasoning enhancements on top. The hybrid system would be stronger than either alone.
+
+---
+
+The full detailed plan with implementation sketches, code examples, and failure mode analysis is saved in `/memories/session/plan.md`.
+
+
+
+# AI Mode Pattern Analysis: Current State & Opportunities
+
+## Executive Summary
+
+The agent system has sophisticated reasoning infrastructure but **missing key AI Mode patterns**. It has pieces (query fan-out, graph storage, reranking) but they're not orchestrated together. The biggest gaps: (1) **no hierarchical chunking with heading context**, (2) **query fan-out not doing semantic variants**, (3) **reranking is dense+sparse fusion, not passage-level LLM evaluation**, (4) **synthesis lacks reasoning transparency/attribution**.
+
+---
+
+## 1. KNOWLEDGE GRAPH USAGE
+
+### Current State ✅ IMPLEMENTED (Tier 1)
+
+**Location & Implementation:**
+- [graph_store.py](v2/project-expo-final/agent/knowledge/graph_store.py#L1-L150) - In-memory adjacency list for entity-relationship triples
+- [graph_rag.py](v2/project-expo-final/agent/knowledge/graph_rag.py) - Merges vector search + graph traversal
+- Feature flag: `knowledge_graph_queries_enabled` in [config/feature_flags.py](v2/project-expo-final/agent/config/feature_flags.py#L23)
+
+**What's Implemented:**
+- ✅ Triple storage: (subject, predicate, object, source_url, confidence)
+- ✅ Entity extraction via LLM (structured JSON output)
+- ✅ N-hop traversal (configurable hops, default 2)
+- ✅ Degree centrality ranking (get_central_entities())
+- ✅ Persistent JSON save/load
+- ✅ Query routing: `should_use_graph()` decides if query benefits from graph
+- ✅ Merge strategy: deduplicate vector + graph results by entity overlap
+
+**Key Methods:**
+- `add_triples()` - deduplicates by (subject, predicate, object)
+- `query_entity()` - BFS traversal up to N hops
+- `get_central_entities()` - returns top-k by mention count
+- `graph_enhanced_retrieval()` - parallel vector search + graph traversal, then merge
+
+**Graph Contents:**
+- Built from document ingestion (folder_ingest.py extracts entities from doc chunks)
+- Stores in `.kb_data/graph.json`
+- No temporal facts currently; all triples treated equally
+
+**Gaps vs AI Mode / Wikidata / ConceptNet:**
+1. ❌ **No concept hierarchies** - only triples, no "parent_of", "subclass_of" relationships explicitly tracked
+2. ❌ **No temporal facts** - "confidence" exists but no "valid_at_time" or time series
+3. ❌ **No weighted relationship types** - all edges equally weighted, no confidence on predicates
+4. ❌ **No reasoning rules** - "If A→B and B→C, derive A→C" not implemented
+5. ❌ **Limited routing** - used only if feature flag ON and query "relationship-heavy"; not used for disambiguation
+
+**Usage Pattern:**
+- Intended for "multi-hop connecting dots" queries
+- Extracted during ingestion, not updated during retrieval
+- Acts as supplementary retrieval source (lower score: `t.confidence * 0.8`)
+
+**Opportunities:**
+1. **Concept hierarchy extraction** - Mark "Python_language → subclass_of → Programming_language" from ingested docs
+2. **Temporal facts** - Extract "founded_at", "acquired_by:date" patterns
+3. **Predicate weighting** - High-confidence predicates (from multiple sources) ranked higher
+4. **Deductive reasoning** - Explicit chain rules for query answering
+5. **Routing enhancement** - Use graph centrality to identify query ambiguity (if 3+ entities connect to the query term, it's ambiguous → needs clarification)
+
+---
+
+## 2. QUERY FAN-OUT (AI Mode Pattern #1)
+
+### Current State ⚠️ PARTIAL (Sub-dimension, Not Semantic Variants)
+
+**Location:**
+- [subquery_generator.py](v2/project-expo-final/agent/core/subquery_generator.py#L1-L150) - Generates dimension-aware subqueries
+- [intent_classifier.py](v2/project-expo-final/agent/core/intent_classifier.py#L200-L250) - Multi-entity focus area extraction
+- [aspect_extractor.py](v2/project-expo-final/agent/core/aspect_extractor.py) - Aspect-based parallel retrieval
+- Orchestrator integrates: [orchestrator.py](v2/project-expo-final/agent/orchestrator/orchestrator.py#L195-L250)
+
+**What's Implemented:**
+```
+SubqueryGenerator.generate_comparison_plan():
+  Input: "Should I buy CDSL or EMVEE?"
+  Output: SubqueryPlan with:
+    - initial_queries = [query, "Compare X vs Y", "Which is better X or Y?"]
+    - dimension_queries = {
+        "price_value": ["CDSL pricing", "EMVEE pricing"],
+        "features_functionality": ["CDSL capabilities", "EMVEE capabilities"],
+        "support_service": [...],
+        ...
+      }
+```
+
+✅ **Dimension-aware subqueries** - Organizes by decision factors (price, features, support, adoption, reviews, etc.)
+✅ **Progressive queries** - Has `generate_gap_filling_queries()` for follow-up based on current learnings
+✅ **Entity tracking** - Comparison detector marks both entities for parallel retrieval
+✅ **Parallel execution** - Orchestrator creates one task node per entity
+
+**Gap vs AI Mode:**
+- ❌ **Not semantic variants** - AI Mode does: "OAuth2 PKCE" → ["OAuth2 code verifier", "PKCE S256", "authorization code flow"]
+  - Current system does: "CDSL" → ["CDSL price", "CDSL features", "CDSL reviews"]
+  - Both valid, but system is **dimension-driven, not synonym/phrasing-driven**
+- ❌ **No multi-query expansion within dimensions** - Should generate 2-3 paraphrases per dimension query
+- ❌ **No LLM-guided ranking** - Dimensions hardcoded; doesn't ask "which dimensions matter most for YOUR decision?"
+- ❌ **No dedup/conflict detection** - If two subqueries ask similar things, system doesn't merge them
+
+**Example Missing Pattern:**
+```
+Query: "Does TypeScript have type narrowing like Rust?"
+
+AI Mode fan-out would generate:
+  1. "Type narrowing in TypeScript" (direct)
+  2. "TypeScript type guards and type predicates" (synonym)
+  3. "Does TypeScript support refinement types?" (semantic variant)
+  4. "Rust pattern matching and type narrowing" (comparison variant)
+
+Current system:
+  1. Detects COMPARISON intent
+  2. Creates: entity1_task="TypeScript narrowing", entity2_task="Rust narrowing"
+  3. No synonym exploration within each entity
+```
+
+**Orchestrator Integration:**
+- [orchestrator.py#L195-L250](v2/project-expo-final/agent/orchestrator/orchestrator.py#L195-L250) - Creates task DAG with entity nodes
+- Focus areas extracted via IntentClassifier → become parallel retriever nodes
+- Each focus area has retrieval_depth ("summary", "details", "comprehensive")
+
+**Opportunities:**
+1. **Semantic variant generation** - For each subquery, generate 2-3 paraphrases via LLM
+2. **Query deduplication** - Use embedding similarity to merge redundant subqueries before executing
+3. **User-guided dimension selection** - Ask user "Which factors matter?" before deep dive
+4. **Adaptive branching** - If one subquery returns abundant results, skip similar ones
+5. **Phrasing diversity** - Expand technical jargon to casual explanations ("type narrowing" → "narrowing down types")
+
+---
+
+## 3. RETRIEVAL QUALITY (Chunking & Hierarchy) - AI Mode Pattern #2-3
+
+### Current State ⚠️ BASIC (No Heading Hierarchy)
+
+**Location:**
+- [chunk.py](v2/project-expo-final/agent/blocks/semantic/chunk.py) - Sentence-boundary chunking
+- Chunk size: `MAX_CHUNK_CHARS = 4000` (vs AI Mode: ~375 words = ~1500 chars)
+- Overlap: `CHUNK_OVERLAP_RATIO = 0.1` (10% overlap)
+
+**What's Implemented:**
+```python
+# From chunk.py
+def chunk_text(text, max_chars=4000, min_chars=100):
+    1. Strip HTML → clean text
+    2. Extract code fences → protect from splitting
+    3. Split at sentence boundaries (via regex)
+    4. Enforce min/max char limits
+    5. Apply 10% overlap between chunks
+    6. Restore code fences
+```
+
+✅ **Sentence-boundary aware** - Doesn't split mid-sentence
+✅ **Code fence preservation** - Keeps code blocks intact
+✅ **Overlap for context** - Previous/next sentence preserved
+✅ **Title extraction** - Attempts to extract title from HTML/Markdown
+✅ **Metadata attached** - source_url, position index tracked
+
+**Gap vs AI Mode:**
+- ❌ **No heading hierarchy** - AI Mode keeps chunk structure: "## API Reference" as heading context for subsequent chunks
+  - Current: "chunk1.text = 'The API endpoint is...'", no knowledge that it's under "API Reference" section
+- ❌ **Chunk size too large** - 4000 chars (1000+ words) vs AI Mode's 375 words (~1500 chars)
+  - **Consequence**: Reranking less precise; passage-level scoring diluted
+- ❌ **No parent document context** - Doesn't preserve "doc title + section hierarchy" in chunk metadata
+- ❌ **No semantic paragraph boundaries** - Uses sentence splits, not paragraph or semantic concept boundaries
+
+**Example:**
+```
+Document structure:
+  # Machine Learning Fundamentals
+  ## Backpropagation
+  Backpropagation is...
+  The chain rule states...
+  
+Current system creates:
+  Chunk 1: "Backpropagation is... The chain rule states..."
+  [No heading context stored]
+  
+AI Mode would create:
+  Chunk 1: 
+    heading: "## Backpropagation (under: Machine Learning Fundamentals)"
+    text: "Backpropagation is... The chain rule states..."
+    parent_section: "Backpropagation"
+    doc_title: "Machine Learning Fundamentals"
+```
+
+**Consequences:**
+1. Reranking can't use "heading relevance" as signal
+2. Synthesis doesn't know chunk topic context (just text content)
+3. User can't filter by section in results
+4. Multi-hop reasoning can't traverse hierarchy
+
+**Opportunities:**
+1. **Heading extraction & hierarchy** - Parse MD/HTML headers → store as chunk metadata
+2. **Chunk size reduction** - Target 375-500 word chunks for finer-grained reranking
+3. **Semantic paragraph detection** - Use LLM or heuristic to identify concept boundaries vs sentence boundaries
+4. **Parent/child relationships** - Store chunk nesting: "chunk_42.parent_id = 38"
+5. **Section-level retrieval** - "Retrieve all chunks under 'Security' section" capability
+
+---
+
+## 4. PASSAGE-LEVEL RERANKING (AI Mode Pattern #4)
+
+### Current State ⚠️ HYBRID (RRF Fusion, Not LLM Reranking)
+
+**Location:**
+- [rerank.py](v2/project-expo-final/agent/blocks/semantic/rerank.py) - RRF + NVIDIA API optional
+- Called from semantic block after retrieval
+- Decision LLM: [decision.py](v2/project-expo-final/agent/blocks/semantic/decision.py#L40-L100)
+
+**What's Implemented:**
+
+**Stage 1: RRF (Reciprocal Rank Fusion)**
+```
+rerank_chunks(query, query_vecs, chunks):
+  1. BM25 scoring (sparse keyword matching)
+  2. Cosine similarity (dense embedding matching)
+  3. RRF formula: 1 / (k + rank)  where k=60
+  4. Fuse scores: RRF(bm25_rank) + RRF(cosine_rank)
+  5. Sort by fused score, return top-k
+```
+
+✅ **Parameter-free** - RRF doesn't require dataset-specific tuning
+✅ **Hybrid signals** - Combines keyword + semantic relevance
+✅ **NVIDIA acceleration optional** - Logit threshold filtering if API available
+✅ **Score attached to chunks** - Each chunk has .score field for ranking
+
+**Stage 2: Decision LLM (Sufficiency Check)**
+```
+decision_llm(query, chunks, depth, max_depth):
+  Decides:
+    1. "sufficient" - is retrieval enough? (EIG check)
+    2. "next_queries" - what gaps remain?
+    3. "needs_code_retriever" - is gap code-shaped?
+    4. "is_comparison_query" - balance exploration of entities?
+```
+
+**Anti-sycophancy:** Calls twice at temp > 0, only accepts "sufficient" if both agree
+
+**Gap vs AI Mode:**
+- ❌ **No passage-level LLM reranking** - AI Mode uses LLM to evaluate each chunk's relevance/quality directly
+  - Current: Numeric score (RRF) used as ranking
+  - AI Mode: LLM says "this chunk directly answers the query" vs "tangential but useful" vs "irrelevant"
+- ❌ **No pairwise comparison** - "Does Chunk A or Chunk B better answer the question?"
+- ❌ **No cross-chunk consistency check** - "Do these chunks contradict each other?"
+- ❌ **No passage coherence scoring** - "Is this chunk coherent or rambling?"
+
+**Decision LLM Usage:**
+- Post-retrieval sufficiency check, not per-chunk evaluation
+- Gated by recursion depth (not on every retrieval)
+- Tracks entity coverage balance for comparisons ("is entity B explored as much as entity A?")
+
+**Opportunities:**
+1. **Chunk-level LLM reranking** - For top-30 candidates, run LLM scoring on each
+2. **Pairwise comparison** - If 2+ chunks claim conflicting facts, LLM adjudicates
+3. **Coherence scoring** - Flag chunks that read as incoherent (parsing errors, language mix)
+4. **Relevance gradation** - Not just yes/no, but "directly addresses", "context", "tangential"
+5. **Confidence-weighted merging** - If two chunks make same claim from different sources, boost confidence
+
+---
+
+## 5. REASONING SYNTHESIS (AI Mode Pattern #5)
+
+### Current State ⚠️ PARTIAL (Narrative Structure, Limited Attribution)
+
+**Location:**
+- [synthesis.py](v2/project-expo-final/agent/llm/synthesis.py) - Global synthesis over all learnings
+- [pivot.py](v2/project-expo-final/agent/core/pivot.py) - Hypothesis-driven pivoting
+- Called from: [query_integration.py](v2/project-expo-final/agent/query_integration.py)
+
+**What's Implemented:**
+
+**Synthesis Strategy:**
+```python
+_SYSTEM_PROMPT includes:
+  1. "NARRATIVE OVER LIST" - connect facts into story
+  2. "HYBRID SURPRISAL" - flag counterintuitive findings
+  3. "REDUNDANCY ELIMINATION" - DOB not both DOB + age
+  4. "GAP BRIDGING" - fill gaps with own knowledge (marked)
+  5. "DEPTH MATCHING" - match technical depth to query
+  6. "SOURCE ATTRIBUTION" - cite where possible
+```
+
+✅ **Narrative synthesis** - Not bullet points, coherent story
+✅ **Redundancy elimination** - Avoids stating derivable facts
+✅ **Gap bridging** - Marks own knowledge vs retrieval
+✅ **Token-aware output** - Calculates adaptive max_tokens based on learnings
+✅ **Depth matching** - Adjusts technicality based on prompt_specificity
+
+**Pivot Loop (Tier 1 feature):**
+- [pivot.py#L40-L100](v2/project-expo-final/agent/core/pivot.py#L40-L100) - GOAL → ACTION → OBSERVE → HYPOTHESIZE → DISCRIMINATE → PIVOT
+- Used when first retriever action fails
+- Generates competing hypotheses instead of blind retry
+- New Tier 3 feature: branching_enabled shows user multiple valid paths
+
+**Gap vs AI Mode:**
+- ❌ **No reasoning path transparency** - User doesn't see which chunks were used for which claims
+- ❌ **No inline citations** - Synthesis doesn't label "This fact came from source X"
+- ❌ **No uncertainty quantification** - System confident, doesn't express doubt
+- ❌ **No multi-chunk coherence** - Doesn't explain how chunks relate to each other
+- ❌ **Synthesis latency not tracked** - User doesn't see synthesis progress
+
+**Example Gap:**
+```
+Current: "Python is known for readability. Django is a popular web framework."
+[User doesn't know which source claimed Python readability]
+
+AI Mode would: "Python is known for readability[1]. Django is a popular web 
+framework[2]. [1] From Python docs (retrieved Aug 2026), [2] From TechRadar review"
+```
+
+**Opportunities:**
+1. **Chunk-to-claim mapping** - Store "claim X was sourced from chunks [3, 5, 12]"
+2. **Inline citations** - Synthesis includes footnotes or [source] markers
+3. **Uncertainty flags** - "Likely" vs "probably" vs "uncertain" language markers
+4. **Dependency visualization** - Show "Fact A supports Fact B" relationships
+5. **Speculative synthesis** - Offer alternative interpretations (like pivot branching)
+
+---
+
+## 6. FAILURE MODE ANALYSIS
+
+### Documented Failure Patterns
+
+**Failure Mode 1: Multi-Entity Query Imbalance**
+- **Symptom**: Comparison queries where one entity is explored deeply, other superficially
+- **Root Cause**: decision_llm can call "sufficient" even if entity coverage imbalanced
+- **Mitigation**: CRAG comparison flag + entity_coverage_balance tracking
+- **File**: [decision.py#L70-L80](v2/project-expo-final/agent/blocks/semantic/decision.py#L70-L80) - "underexplored_entities" field
+
+**Failure Mode 2: Sycophantic Sufficiency Check**
+- **Symptom**: LLM says "sufficient" when retrieval is shallow
+- **Root Cause**: Single-pass LLM decision prone to false confidence
+- **Mitigation**: Anti-sycophancy via dual-call at temperature > 0 (only accept if both agree)
+- **File**: [decision.py#L115-L145](v2/project-expo-final/agent/blocks/semantic/decision.py#L115-L145) - "self_consistency_calls: int"
+
+**Failure Mode 3: Chunk Size Dilution**
+- **Symptom**: Reranking imprecise; irrelevant content in 4000-char chunk drags score down
+- **Root Cause**: Chunks too large; multiple concepts per chunk
+- **Consequence**: Hard to identify which part of chunk is relevant
+- **File**: [budgets.py#L23](v2/project-expo-final/agent/config/budgets.py#L23) - MAX_CHUNK_CHARS = 4000
+
+**Failure Mode 4: Circuit Breaker Fragility**
+- **Symptom**: If semantic retriever fails 3x, system gives up entirely
+- **Root Cause**: Subagent registry threshold too low; no recovery
+- **Mitigation**: Threshold tracked but not adaptively increased
+- **File**: [orchestrator.py#L30](v2/project-expo-final/agent/orchestrator/orchestrator.py#L30) - SubagentRegistry(break_threshold=3)
+
+**Failure Mode 5: Graph Not Used for Disambiguation**
+- **Symptom**: "Apple" query retrieves both Apple Inc. and apple fruit; no disambiguation
+- **Root Cause**: Graph used only if feature flag ON; not used for entity disambiguation
+- **Opportunity**: Use graph centrality to surface ambiguity early
+- **File**: [graph_rag.py#L40](v2/project-expo-final/agent/knowledge/graph_rag.py#L40) - should_use_graph() is query-type gate, not ambiguity gate
+
+**Failure Mode 6: No Hierarchical Context in Chunks**
+- **Symptom**: User gets chunk about "OAuth2" but doesn't know it's from "Security" section
+- **Root Cause**: Heading extraction present but not stored as chunk metadata
+- **Consequence**: Reranking can't use section relevance; synthesis lacks context
+- **File**: [chunk.py#L120-L150](v2/project-expo-final/agent/blocks/semantic/chunk.py#L120-L150) - extract_title() exists but not parent section
+
+**Failure Mode 7: Synthesis Token Cutoff**
+- **Symptom**: Complex queries get truncated synthesis (~1024 tokens instead of full answer)
+- **Root Cause**: Adaptive token calculation was returning 0 in early versions; now fixed in synthesis.py
+- **File**: [synthesis.py#L75-L100](v2/project-expo-final/agent/llm/synthesis.py#L75-L100) - _calculate_adaptive_max_tokens() now returns actual values
+
+**Failure Mode 8: Query Fan-Out Doesn't Deduplicate**
+- **Symptom**: Two subqueries ask very similar things; both execute wasting tokens
+- **Root Cause**: SubqueryGenerator.generate_comparison_plan() doesn't dedup similar dimension queries
+- **Example**: Both "CDSL pricing" and "How much does CDSL cost?" run separately
+- **File**: [subquery_generator.py#L140-L160](v2/project-expo-final/agent/core/subquery_generator.py#L140-L160)
+
+---
+
+## 7. NEW PATTERN OPPORTUNITIES (Derived from Constraints)
+
+### Pattern Idea 1: Progressive Constraint Satisfaction for Query Expansion
+
+**Constraint Analysis:**
+- Current system: Generates dimension queries for comparisons (static)
+- Problem: Dimensions not always relevant; user attention finite
+- Insight: Query expansion is itself a mini-optimization problem
+
+**Derived Pattern: Staged Query Expansion with Feedback Loop**
+```
+Stage 1: Fast Heuristic Expansion
+  Input query → generate 3-5 candidate subqueries
+  Cost: ~100ms heuristic-based
+  
+Stage 2: Parallel Pilot Retrieval (10% token budget)
+  Fire each subquery with shallow depth
+  Collect sample results
+  
+Stage 3: Evaluate Information Gain (EIG)
+  For each subquery: "How much new info does this add?"
+  Rank by EIG / (token_cost + latency)
+  
+Stage 4: Adaptive Selection
+  Select top-k subqueries (k = budget / avg_cost)
+  Execute remaining subqueries in parallel
+  
+Result: Expensive subqueries (broad concepts) auto-deprioritized
+        in favor of targeted, high-EIG queries
+```
+
+**Why This Works:**
+- Not a recombination of existing patterns
+- Flows from actual constraint: "We have limited token budget and user attention"
+- Requires neither knowledge graphs nor fancy LLMs
+- Can reuse existing subquery generator + decision_llm EIG scoring
+
+**Implementation Sketch:**
+1. Modify SubqueryGenerator to return all candidates with low confidence
+2. Add "pilot phase" that runs top-5 with shallow depth (1-2 results)
+3. Use decision_llm to score EIG of pilot results
+4. Filter and expand based on EIG ranking
+
+---
+
+### Pattern Idea 2: Confidence Decay Network for Entity Disambiguation
+
+**Constraint Analysis:**
+- Current system: Graph stores entities but not used for disambiguation
+- Problem: "Apple" returns both Inc. + fruit; graph has no sense of "these are different things"
+- Insight: Disambiguation is a shortest-path problem in mention frequency space
+
+**Derived Pattern: Mention Decay Network**
+```
+Assumption: More frequently co-mentioned entities are related
+           Entities mentioned far apart are probably different meanings
+
+Algorithm:
+1. Extract entities from query
+2. Build mention co-occurrence matrix from graph
+3. For each query entity, compute shortest path to other entities
+4. Filter graph: keep only entities within 2-hop distance
+5. Use path length as confidence weight in reranking
+
+Example:
+  Query: "Apple"
+  Graph has: Apple_Inc (1000 mentions) ↔ Steve_Jobs ↔ Tim_Cook
+             apple_fruit (500 mentions) ↔ orchards ↔ agriculture
+  
+  If query co-occurs with "iPhone", strengthen Apple_Inc path
+  If query co-occurs with "orchard", strengthen apple_fruit path
+```
+
+**Why This Works:**
+- Uses existing graph structure (no new storage)
+- Computationally lightweight (Floyd-Warshall variant)
+- Improves retrieval precision for ambiguous entities
+- Doesn't require external entity linking service
+
+**Implementation Sketch:**
+1. Add co-occurrence matrix to GraphStore
+2. In graph_enhanced_retrieval(), filter candidates by path length
+3. Weight graph triple scores by "distance from query entity"
+
+---
+
+### Pattern Idea 3: Hybrid Chunk Materialization (Eager + Lazy)
+
+**Constraint Analysis:**
+- Current system: All chunks materialized at fetch time (eager)
+- Problem: Large documents generate 100+ chunks; most not retrieved
+- Opportunity: Lazy chunking saves 60-70% ingestion time
+
+**Derived Pattern: Two-Phase Chunking**
+```
+Phase 1: EAGER (at ingest time)
+  - Split doc into large 10k-char "sections" (no overlap)
+  - Index section-level embeddings
+  - Store section boundaries in metadata
+  - Cost: ~200ms per 100KB doc (just indexing, no semantic parse)
+  
+Phase 2: LAZY (at retrieval time, for top-k sections)
+  - Retrieve top-3 sections by semantic score
+  - Re-chunk those sections finely (375-word chunks)
+  - Index fine chunks
+  - Use fine chunks for reranking
+  
+Result:
+  - Ingest speed: 3x faster (no fine chunking upfront)
+  - Retrieval latency: +100ms (on-demand fine chunking)
+  - Reranking quality: Same (uses same chunk size)
+  - Memory footprint: 70% reduction (fewer embeddings)
+```
+
+**Why This Works:**
+- Trades ingest time for retrieval latency (acceptable tradeoff)
+- Reuses existing chunking logic (no new algorithms)
+- Addressable by adding "chunk_level" field to Chunk metadata
+- Works especially well for large, sparse document collections
+
+**Implementation Sketch:**
+1. Add chunk_level: "section" | "fine" field to Chunk dataclass
+2. Modify chunk_text() to accept level parameter
+3. In semantic block, add second chunking pass for top-k candidates
+4. Store section→fine_chunk mappings for attribution
+
+---
+
+## 8. DEPENDENCIES BETWEEN IMPROVEMENTS
+
+### Dependency Graph
+
+```
+┌─ Heading Hierarchy (Chunk Enhancement) ────────────┐
+│  └─ Enables: Section-level reranking               │
+│  └─ Blocks by: No change if ignored                │
+│                                                     │
+├─ Query Fan-Out Dedup (Expansion Optimization) ─────┤
+│  └─ Depends on: SubqueryGenerator refactor         │
+│  └─ Enables: Semantic variant generation           │
+│                                                     │
+├─ LLM Passage Reranking (Decision Quality) ─────────┤
+│  └─ Depends on: Smaller chunks (375 words)         │
+│  └─ Depends on: Heading hierarchy (for context)    │
+│  └─ Enables: Better sufficiency decisions          │
+│                                                     │
+├─ Chunk Size Reduction (4000 → 500 words) ──────────┤
+│  └─ PREREQUISITE for passage reranking             │
+│  └─ PREREQUISITE for heading hierarchy to matter   │
+│  └─ Side effect: +30% ingest time (more chunks)    │
+│                                                     │
+├─ Inline Citation System (Synthesis Transparency) ──┤
+│  └─ Depends on: Chunk-to-claim mapping             │
+│  └─ Enables: User verification of facts            │
+│  └─ Side effect: +5% synthesis latency (tracking)  │
+│                                                     │
+├─ Entity Disambiguation (Graph Enhancement) ───────┤
+│  └─ Depends on: Co-occurrence matrix in graph      │
+│  └─ Enables: Better graph_enhanced_retrieval()     │
+│  └─ Conflicts with: Nothing (additive)             │
+│                                                     │
+└─ Progressive Constraint Satisfaction (Expansion) ──┘
+   └─ Depends on: Existing subquery_generator
+   └─ Depends on: decision_llm EIG scoring
+   └─ Enables: Token budget optimization
+   └─ Optional enhancement (works without it)
+```
+
+### Recommended Sequencing (No Waiting):
+
+**CRITICAL PATH (must do in order):**
+1. **Chunk Size Reduction** (4000 → 500 chars) - foundation for everything else
+   - Effort: Medium (updates budgets.py, may need re-indexing existing KB)
+   - Time: 2-3 hours
+   - Impact: Unlocks better reranking, enables heading hierarchy
+   
+2. **Heading Hierarchy Extraction** - requires smaller chunks to matter
+   - Effort: Low-Medium (parse HTML/MD for headers, store in metadata)
+   - Time: 1.5-2 hours
+   - Impact: Enables section-aware reranking
+
+**PARALLEL TRACK A (Retrieval Quality):**
+3. **LLM Passage Reranking** - improves decision quality
+   - Depends on: #1, #2
+   - Effort: Medium (implement LLM scorer for top-30 chunks)
+   - Time: 2-3 hours
+   - Impact: +15-20% decision accuracy
+
+**PARALLEL TRACK B (Query Expansion):**
+4. **Query Fan-Out Dedup** - immediate win, no dependencies
+   - Depends on: Nothing
+   - Effort: Low (embedding similarity between subqueries)
+   - Time: 1 hour
+   - Impact: +20% token efficiency
+
+5. **Progressive Constraint Satisfaction** - extends #4
+   - Depends on: #4 (optional)
+   - Effort: Medium (pilot phase + EIG ranking)
+   - Time: 2-3 hours
+   - Impact: +30-40% token efficiency on complex queries
+
+**PARALLEL TRACK C (Attribution):**
+6. **Inline Citation System** - improves trust
+   - Depends on: Nothing (orthogonal)
+   - Effort: Low-Medium (track chunk IDs during synthesis)
+   - Time: 1.5-2 hours
+   - Impact: Better UX, easier debugging
+
+**NICE-TO-HAVE (No dependencies):**
+7. **Entity Disambiguation via Graph** - improves edge cases
+   - Depends on: Nothing
+   - Effort: Medium (co-occurrence matrix + path filtering)
+   - Time: 2-3 hours
+   - Impact: Better handling of ambiguous entities
+
+---
+
+## 9. PRIORITIZED IMPROVEMENT LIST
+
+### Tier 1: Foundational (Do First)
+
+| Priority | Improvement | Effort | Impact | Dependencies |
+|----------|-------------|--------|--------|--------------|
+| **P0** | Reduce chunk size 4000→500 chars | Medium | Unlocks reranking | None |
+| **P1** | Extract heading hierarchy | Low-Med | Enables section context | P0 |
+| **P2** | LLM passage-level reranking | Medium | +15-20% accuracy | P0, P1 |
+
+**Why P0-P2 First:**
+- P0 is prerequisite for everything retrieval-related
+- P1 + P2 together improve "sufficiency" decision quality significantly
+- Low risk (pure enhancement, backward compatible)
+- High impact (affects all queries)
+
+### Tier 2: Query Optimization (In Parallel)
+
+| Priority | Improvement | Effort | Impact | Dependencies |
+|----------|-------------|--------|--------|--------------|
+| **P3** | Query fan-out dedup | Low | +20% token efficiency | None |
+| **P4** | Progressive constraint satisfaction | Medium | +30-40% efficiency | P3 (optional) |
+| **P5** | Semantic variant generation | Medium | Handles phrasing variation | P3 |
+
+**Why P3-P5 Parallel:**
+- Independent of retrieval chain
+- Can launch in parallel with P0-P2
+- P3 is quick win
+- P4 requires P3 foundations only
+
+### Tier 3: Attribution & Trust (Nice-to-Have)
+
+| Priority | Improvement | Effort | Impact | Dependencies |
+|----------|-------------|--------|--------|--------------|
+| **P6** | Chunk-to-claim mapping | Low | Enables citations | None |
+| **P7** | Inline citation rendering | Low-Med | Better transparency | P6 |
+| **P8** | Uncertainty quantification | Medium | More honest synthesis | None |
+
+**Why P6-P8 Last:**
+- UX enhancement, not core functionality
+- Can ship independently
+- Lower impact on reasoning quality
+
+### Tier 4: Graph & Disambiguation (Specialized)
+
+| Priority | Improvement | Effort | Impact | Dependencies |
+|----------|-------------|--------|--------|--------------|
+| **P9** | Entity disambiguation via graph | Medium | Better graph_enhanced_retrieval | None |
+| **P10** | Concept hierarchy extraction | Medium-High | Enables reasoning rules | None |
+
+**Why P9-P10 Optional:**
+- Helps edge cases, not mainstream path
+- Complex to implement correctly
+- Graph currently works (feature-flagged)
+- Lower immediate impact
+
+---
+
+## 10. CONCRETE FILE CHANGES REQUIRED
+
+### For P0 (Chunk Size Reduction)
+
+**Files to modify:**
+1. [config/budgets.py](v2/project-expo-final/agent/config/budgets.py#L23)
+   - `MAX_CHUNK_CHARS: 4000 → 500`
+   - `CHUNK_OVERLAP_RATIO: 0.1 → 0.15` (more overlap needed with smaller chunks)
+
+2. [blocks/semantic/chunk.py](v2/project-expo-final/agent/blocks/semantic/chunk.py#L120-L180)
+   - Update chunking logic to respect new max (might need paragraph-level split)
+   - Consider semantic paragraph detection
+
+3. [knowledge/kb_store.py](v2/project-expo-final/agent/knowledge/kb_store.py) - if exists
+   - Re-index will be needed for existing KB
+
+**Backward compat:** Add feature flag to allow gradual rollout
+
+### For P1 (Heading Hierarchy)
+
+**Files to modify:**
+1. [blocks/semantic/types.py](v2/project-expo-final/agent/blocks/semantic/types.py#L44)
+   - Add to Chunk dataclass:
+     ```python
+     heading: str = ""              # e.g., "## API Reference"
+     parent_section: str = ""       # e.g., "API Reference"
+     doc_title: str = ""
+     chunk_level: int = 0           # heading level (1-6 for h1-h6)
+     ```
+
+2. [blocks/semantic/chunk.py](v2/project-expo-final/agent/blocks/semantic/chunk.py)
+   - Add heading extraction during chunking
+   - Store heading with each chunk
+   - Track section nesting
+
+3. [blocks/semantic/sources.py](v2/project-expo-final/agent/blocks/semantic/sources.py#L42-L70)
+   - Attach heading context when creating chunks from fetched URLs
+
+### For P2 (LLM Passage Reranking)
+
+**Files to modify:**
+1. [blocks/semantic/rerank.py](v2/project-expo-final/agent/blocks/semantic/rerank.py#L100-L150)
+   - Add new function `rerank_with_llm()` after RRF stage
+   - For top-30 chunks, call LLM to evaluate relevance
+   - Blend RRF score (80%) + LLM score (20%)
+
+2. [blocks/semantic/decision.py](v2/project-expo-final/agent/blocks/semantic/decision.py)
+   - Extract passage evaluation logic into helper function
+   - Reuse in reranking pipeline
+
+### For P3 (Query Fan-Out Dedup)
+
+**Files to modify:**
+1. [core/subquery_generator.py](v2/project-expo-final/agent/core/subquery_generator.py#L140-L160)
+   - After generating subqueries, embed each one
+   - Deduplicate by cosine similarity (threshold: 0.8)
+   - Keep higher-priority subquery, drop redundant ones
+
+2. [core/types.py](v2/project-expo-final/agent/core/types.py) - if needed
+   - Add SubqueryPlan.dedup_log field to track removed queries
+
+### For P6-P7 (Inline Citations)
+
+**Files to modify:**
+1. [blocks/semantic/types.py](v2/project-expo-final/agent/blocks/semantic/types.py#L44)
+   - Add Chunk.citation_id: str (unique per chunk)
+
+2. [llm/synthesis.py](v2/project-expo-final/agent/llm/synthesis.py#L40-L100)
+   - Modify synthesis prompt to expect citation format
+   - Post-process output to insert [N] references
+   - Build reference list from learnings metadata
+
+---
+
+## 11. TECHNICAL SUMMARY
+
+### What AI Mode Does Well That This System Doesn't:
+1. **Semantic query variants** - Paraphrases, synonyms, alternative phrasings (system does dimensions instead)
+2. **Passage-level LLM evaluation** - Per-chunk relevance scoring (system uses RRF numeric fusion)
+3. **Heading hierarchy in chunks** - Section context preserved (system loses this)
+4. **Reasoning transparency** - Why this chunk was used for this claim (system synthesizes without attribution)
+
+### What This System Does Well That AI Mode Doesn't:
+1. **Multi-entity comparison tracking** - Explicit focus areas with relationship types (AI Mode is less structured)
+2. **Decision-aware decomposition** - Breaks queries by decision dimensions (more semantic than generic fan-out)
+3. **Adaptive pivot loop** - Hypothesis-driven retries instead of blind retries
+4. **Branching options** - Tier 3 feature to show users multiple valid approaches
+5. **Knowledge graph integration** - Entity-relationship storage for multi-hop reasoning
+
+### Key Insight:
+This system's strength is **structured reasoning** (decomposition, entity tracking, pivoting). AI Mode's strength is **retrieval quality** (semantic variants, passage reranking, chunk context). A hybrid approach would combine both.
+
+**Specific Recommendation:** Start with retrieval quality improvements (P0-P2) to raise the floor, then layer structured reasoning enhancements on top.
+
+
