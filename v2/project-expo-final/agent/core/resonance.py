@@ -243,4 +243,4 @@ def should_continue_retrieval(
     if not satisfaction_met:
         reason_parts.append(f"unsatisfied: {', '.join(unsatisfied)}")
     return True, " + ".join(reason_parts) + " → continue"
-""", "Description": "Derived pattern: resonance-based sufficiency detection that measures learning overlap between retrieval rounds instead of relying on sycophantic LLM judgments."
+

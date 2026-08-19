@@ -394,6 +394,7 @@ async def run_query(
     # Uses EXISTING SatisfactionTracker + critique.py (were disconnected until now)
     satisfaction_scores = {}
     unsatisfied_concepts = []
+    wave_2_learnings = []  # Initialized for resonance check at round > 0
 
     for retrieval_round in range(MAX_SATISFACTION_ROUNDS):
         if not satisfaction:
@@ -436,8 +437,10 @@ async def run_query(
             critique_queries = []
             try:
                 from .core.critique import run_critique_on_retrieval
+                # Convert Learning objects to strings for critique
+                learning_texts = [l.text if hasattr(l, 'text') else str(l) for l in all_learnings]
                 critique_result = await run_critique_on_retrieval(
-                    effective_query, all_learnings, client=client,
+                    effective_query, learning_texts, client=client,
                 )
                 if critique_result and hasattr(critique_result, 'suggested_queries'):
                     critique_queries = critique_result.suggested_queries or []
