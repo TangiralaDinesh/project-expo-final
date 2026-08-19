@@ -72,15 +72,15 @@ class NIMSettings:
     per_key_concurrency: int = 5
 
     # Timeouts (seconds)
-    chat_timeout: float = field(default_factory=lambda: float(_env("NIM_CHAT_TIMEOUT", "30.0")))
-    fast_timeout: float = field(default_factory=lambda: float(_env("NIM_FAST_TIMEOUT", "5.0")))
+    chat_timeout: float = field(default_factory=lambda: float(_env("NIM_CHAT_TIMEOUT", "45.0")))
+    fast_timeout: float = field(default_factory=lambda: float(_env("NIM_FAST_TIMEOUT", "12.0")))
     embed_timeout: float = field(default_factory=lambda: float(_env("NIM_EMBED_TIMEOUT", "20.0")))
     stream_timeout: float = field(default_factory=lambda: float(_env("NIM_STREAM_TIMEOUT", "60.0")))
 
-    # Retry config
-    max_retries: int = 3
-    backoff_base: float = 1.0
-    backoff_max: float = 8.0
+    # Retry config — fewer retries to avoid timeout spiral (2 retries × 45s = 90s max vs 3 × 30s = 97s)
+    max_retries: int = 2
+    backoff_base: float = 0.5
+    backoff_max: float = 4.0
 
     @property
     def primary_key(self) -> str:
@@ -206,3 +206,20 @@ class Settings:
 
 # Module-level singleton — import this everywhere
 settings = Settings()
+
+# Startup diagnostics — log key counts so missing keys are immediately visible
+import logging as _log
+_settings_logger = _log.getLogger(__name__)
+_settings_logger.info(
+    "Settings loaded: NIM keys=%d (agent=%d, code=%d), Groq keys=%d, Brave keys=%d, SerpAPI keys=%d | "
+    "Chat model=%s | Fast timeout=%.0fs | Chat timeout=%.0fs",
+    len(settings.nim.api_keys), len(settings.nim.agent_keys), len(settings.nim.code_keys),
+    len(settings.nim.groq_api_keys),
+    len(settings.brave.api_keys), len(settings.serpapi.api_keys),
+    settings.nim.chat_model, settings.nim.fast_timeout, settings.nim.chat_timeout,
+)
+if not settings.nim.groq_api_keys:
+    _settings_logger.warning(
+        "⚠️  Groq API keys not configured — reasoning workers will use NIM (slower). "
+        "Set GROQ_API_KEY_1 in .env for 5-10× faster reasoning calls."
+    )

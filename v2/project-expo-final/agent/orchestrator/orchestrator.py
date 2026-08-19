@@ -197,7 +197,7 @@ async def decompose_task(
             # ── LLM-POWERED entity research planning ──
             # Instead of "search entity name", LLM generates SPECIFIC questions
             try:
-                from .llm_reasoning import generate_entity_research_plans
+                from ..core.llm_reasoning import generate_entity_research_plans
                 research_plans = await generate_entity_research_plans(
                     task, entity_names, client=client,
                 )
@@ -250,24 +250,9 @@ async def decompose_task(
                         depends_on=[],
                     ))
             
-            # Add synthesis node that depends on all entity nodes
-            entity_node_ids = [n.node_id for n in nodes]
-            synthesis_node = TaskNode(
-                node_id="focus_synthesis",
-                subagent_type=SubagentType.RETRIEVER,
-                task=(
-                    f"Synthesize comparison: {task}\n"
-                    f"Entities: {', '.join(entity_names)}\n"
-                    f"Provide balanced analysis across all dimensions, "
-                    f"with clear distinctions and recommendation factors."
-                ),
-                depends_on=entity_node_ids,
-            )
-            nodes.append(synthesis_node)
-            
             logger.info(
                 f"Comparison decomposition: intent={intent_analysis.intent.value}, "
-                f"entities={entity_names}, confidence={intent_analysis.confidence:.2f}"
+                f"entities={entity_names}, nodes={len(nodes)}, confidence={intent_analysis.confidence:.2f}"
             )
             
             return Decomposition(

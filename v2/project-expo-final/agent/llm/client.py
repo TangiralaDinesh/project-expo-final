@@ -167,7 +167,8 @@ class NIMClient:
     ) -> str:
         """Non-streaming chat completion. Returns the text of the first choice."""
         model = model or self._cfg.chat_model
-        timeout = timeout or self._cfg.chat_timeout
+        # Cap timeout at 60s — user may set NIM_CHAT_TIMEOUT=300 but that causes timeout spiral
+        timeout = min(timeout or self._cfg.chat_timeout, 60.0)
         api_key = await self._next_key()
         sema = self._key_semas.get(api_key, asyncio.Semaphore(5))
 
@@ -213,7 +214,7 @@ class NIMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             response_format_json=response_format_json,
-            timeout=self._cfg.fast_timeout,
+            timeout=min(self._cfg.fast_timeout, 20.0),  # Cap at 20s for fast calls
         )
 
     async def chat_worker(
@@ -225,15 +226,43 @@ class NIMClient:
         max_tokens: int = 1024,
         response_format_json: bool = False,
     ) -> str:
-        """Dedicated worker for non-thinking high-speed semantic tasks via Groq."""
+        """Dedicated worker for non-thinking high-speed semantic tasks via Groq.
+        Falls back to NIM with tight timeout when Groq is unavailable."""
         # Thread-safe round-robin for Groq keys
         keys = self._cfg.groq_api_keys if self._cfg.groq_api_keys else ([self._cfg.groq_api_key] if self._cfg.groq_api_key else [])
+        
         if not keys:
-            return await self.chat_fast(
-                messages, model=model, temperature=temperature,
-                max_tokens=max_tokens, response_format_json=response_format_json
-            )
-        # Atomic counter increment (safe in asyncio single-thread, matches _next_key pattern)
+            # Groq unavailable — use NIM directly with TIGHT timeout (not global fast_timeout)
+            # Reasoning workers must be fast: 15s max, 1 retry, small tokens
+            worker_timeout = min(self._cfg.fast_timeout, 15.0)  # Cap at 15s regardless of env
+            api_key = await self._next_key()
+            sema = self._key_semas.get(api_key, asyncio.Semaphore(5))
+            model_name = model or self._cfg.fast_model
+            body = {
+                "model": model_name,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": min(max_tokens, 512),  # Cap tokens for speed
+            }
+            if response_format_json:
+                body["response_format"] = {"type": "json_object"}
+
+            async def _nim_fast():
+                session = self._ensure_session()
+                async with sema:
+                    async with session.post(
+                        f"{self._cfg.base_url}/chat/completions",
+                        headers=self._headers(api_key),
+                        json=body,
+                        timeout=aiohttp.ClientTimeout(total=worker_timeout),
+                    ) as resp:
+                        resp.raise_for_status()
+                        data = await resp.json()
+                        return data["choices"][0]["message"]["content"]
+
+            return await self._call_with_backoff(_nim_fast, max_retries=1)
+        
+        # Groq available — use it (fast path)
         async with self._key_lock:
             idx = self._key_idx
             self._key_idx += 1
@@ -259,7 +288,7 @@ class NIMClient:
                 f"{self._cfg.groq_base_url}/chat/completions",
                 headers=headers,
                 json=body,
-                timeout=aiohttp.ClientTimeout(total=self._cfg.fast_timeout),
+                timeout=aiohttp.ClientTimeout(total=min(self._cfg.fast_timeout, 15.0)),
             ) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
@@ -403,7 +432,7 @@ class NIMClient:
                     f"{self._cfg.base_url}/ranking",
                     headers=self._headers(api_key),
                     json=body,
-                    timeout=aiohttp.ClientTimeout(total=5.0),
+                    timeout=aiohttp.ClientTimeout(total=10.0),
                 ) as resp:
                     resp.raise_for_status()
                     data = await resp.json()

@@ -426,12 +426,13 @@ async def run_query(
     unsatisfied_concepts = []
     wave_2_learnings = []
     llm_quality_score = 0.0
+    reasoning_start = time.time()  # Track reasoning loop start, not query start
 
     for retrieval_round in range(MAX_SATISFACTION_ROUNDS):
-        # Time budget check
-        elapsed = time.time() - t0
-        if elapsed > 55.0:  # Hard budget: 55s for retrieval phases
-            logger.info("Reasoning loop: time budget exhausted (%.0fs), stopping", elapsed)
+        # Time budget: reasoning loop gets 30s from when it starts (not query start)
+        reasoning_elapsed = time.time() - reasoning_start
+        if reasoning_elapsed > 30.0:
+            logger.info("Reasoning loop: time budget exhausted (%.0fs in reasoning), stopping", reasoning_elapsed)
             break
 
         async with trace.span(
