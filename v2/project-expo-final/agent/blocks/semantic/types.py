@@ -51,6 +51,12 @@ class Chunk:
     title: str = ""
     position: int = 0  # position within parent document
 
+    # Phase 3: Heading hierarchy for structure-aware reranking
+    heading_path: str = ""        # "## API Reference > ### Authentication"
+    section_title: str = ""       # "Authentication"
+    doc_title: str = ""           # "Django REST Framework Documentation"
+    heading_level: int = 0        # 1-6 (h1-h6), 0 = no heading
+
 
 @dataclass
 class Decision:
@@ -69,6 +75,9 @@ class Decision:
     # Phase 1: Comparison query handling
     is_comparison_query: bool = False    # This is a comparison (X vs Y)?
     underexplored_entities: list[str] = field(default_factory=list)  # Which entities need more exploration?
+
+    # Phase 7: Computation routing
+    needs_computation: bool = False      # Gap is code-shaped? Route to self_tools
 
 
 @dataclass
@@ -91,6 +100,8 @@ class Learning:
     text: str
     source_url: str = ""
     score: float = 0.0
+    title: str = ""                      # Source document title
+    citation_id: str = ""                # e.g., "[1]", "[2]" — assigned before synthesis
 
 
 # Type aliases for injectable seams

@@ -393,7 +393,7 @@ def _parse(raw: str) -> dict:
 
 def _to_decision(parsed: dict) -> GateDecision:
     mode = parsed.get("mode", "SEMANTIC")
-    if mode not in ("PARAMETRIC", "SEMANTIC", "CODE", "HYBRID", "SKILL", "URL_DIRECT"):
+    if mode not in ("PARAMETRIC", "SEMANTIC", "CODE", "COMPUTATION", "HYBRID", "SKILL", "URL_DIRECT"):
         mode = "SEMANTIC"
     return GateDecision(
         needs_retrieval=parsed.get("needs_retrieval", True),

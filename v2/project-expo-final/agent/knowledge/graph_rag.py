@@ -27,6 +27,7 @@ from ..knowledge.kb_store import KBStore, get_kb_store
 from ..knowledge.graph_store import (
     GraphStore, get_graph_store, extract_entities, Triple,
 )
+from ..knowledge.external_kg import get_external_kg, ExternalKGBridge
 from ..blocks.semantic.types import Chunk, Learning
 from ..config.settings import settings
 
@@ -105,6 +106,28 @@ async def graph_enhanced_retrieval(
     for entity in query_entities:
         triples = graph.query_entity(entity, hops=graph_hops)
         graph_triples.extend(triples)
+
+    # ── Phase 11: External KG enrichment when local graph is thin ──
+    external_kg = get_external_kg()
+    for entity in query_entities:
+        local_count = len([t for t in graph_triples
+                          if t.subject.lower() == entity.lower()
+                          or t.object.lower() == entity.lower()])
+        if local_count < 3:
+            try:
+                external_triples = await external_kg.enrich_with_fallback(
+                    entity,
+                    include_hierarchy=True,
+                    include_commonsense=False,
+                    graph=graph,  # Auto-cache locally
+                )
+                graph_triples.extend(external_triples)
+                logger.info(
+                    "External KG enriched '%s': +%d triples (local had %d)",
+                    entity, len(external_triples), local_count,
+                )
+            except Exception as e:
+                logger.debug("External KG enrichment failed for '%s': %s", entity, e)
 
     if not graph_triples:
         return vector_chunks

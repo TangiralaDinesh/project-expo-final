@@ -296,6 +296,24 @@ async def semantic_retriever_block(
 
     if decision.sufficient or at_depth_limit:
         reason = "leaf_answered" if decision.sufficient else "depth_budget"
+
+        # Phase 13: Self-directed tool use for computation gaps
+        if decision.needs_computation and not decision.sufficient:
+            try:
+                from ...core.self_tools import get_self_tool_router
+                router = get_self_tool_router()
+                tool_decision = await router.should_self_execute(
+                    query=inp.query or query_label,
+                    gap_description=decision.reason,
+                )
+                if tool_decision.should_execute:
+                    result = await router.execute_and_learn(tool_decision)
+                    if result:
+                        learnings.append(result["text"])
+                        logger.info("Self-tool computation added learning: %s", result["text"][:80])
+            except Exception as e:
+                logger.debug("Self-tool routing failed: %s", e)
+
         return NodeResult(query_label, learnings, source_urls, terminated_reason=reason)
 
     # ----- Spawn children in parallel -----

@@ -19,6 +19,10 @@ from typing import Optional
 from ...config.budgets import MAX_CHUNK_CHARS, MIN_CHUNK_CHARS, CHUNK_OVERLAP_RATIO
 from .types import Chunk
 
+# Heading detection for hierarchy extraction
+_MD_HEADING = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
+_HTML_HEADING = re.compile(r'<h([1-6])[^>]*>(.*?)</h\1>', re.IGNORECASE | re.DOTALL)
+
 
 # ---------------------------------------------------------------------------
 # HTML / boilerplate stripping
@@ -162,6 +166,37 @@ def chunk_text(
     # Protect code fences from splitting
     text_safe, fences = _extract_code_fences(text)
 
+    # Phase 3: Extract heading hierarchy before splitting
+    heading_stack: list[tuple[int, str]] = []  # [(level, title), ...]
+    current_heading_path = ""
+    current_section_title = ""
+    current_heading_level = 0
+
+    # Build a map: line_offset → heading info
+    heading_positions: list[tuple[int, int, str]] = []  # (char_pos, level, title)
+    for m in _MD_HEADING.finditer(text_safe):
+        level = len(m.group(1))
+        heading_title = m.group(2).strip()
+        heading_positions.append((m.start(), level, heading_title))
+
+    def _get_heading_at_pos(pos: int) -> tuple[str, str, int]:
+        """Get the heading context at a character position."""
+        active_stack: list[tuple[int, str]] = []
+        for h_pos, h_level, h_title in heading_positions:
+            if h_pos > pos:
+                break
+            # Pop headings of equal or lower rank
+            while active_stack and active_stack[-1][0] >= h_level:
+                active_stack.pop()
+            active_stack.append((h_level, h_title))
+
+        if active_stack:
+            path = " > ".join(f"{'#' * lvl} {t}" for lvl, t in active_stack)
+            section = active_stack[-1][1]
+            level = active_stack[-1][0]
+            return path, section, level
+        return "", "", 0
+
     # Split into sentences
     sentences = _split_sentences(text_safe)
     if not sentences:
@@ -179,11 +214,20 @@ def chunk_text(
             # Emit chunk
             chunk_text_raw = " ".join(current_parts)
             chunk_text_restored = _restore_code_fences(chunk_text_raw, fences)
+
+            # Phase 3: Determine heading context for this chunk
+            chunk_start_pos = text_safe.find(current_parts[0]) if current_parts else 0
+            h_path, h_section, h_level = _get_heading_at_pos(chunk_start_pos)
+
             chunks.append(Chunk(
                 text=chunk_text_restored,
                 source_url=source_url,
                 title=title,
                 position=len(chunks),
+                heading_path=h_path,
+                section_title=h_section,
+                doc_title=title,
+                heading_level=h_level,
             ))
 
             # Overlap: keep tail sentences that fit within overlap budget
@@ -206,6 +250,10 @@ def chunk_text(
         chunk_text_raw = " ".join(current_parts)
         chunk_text_restored = _restore_code_fences(chunk_text_raw, fences)
 
+        # Phase 3: Heading context for final chunk
+        chunk_start_pos = text_safe.find(current_parts[0]) if current_parts else 0
+        h_path, h_section, h_level = _get_heading_at_pos(chunk_start_pos)
+
         # Merge with last chunk if too small
         if len(chunk_text_restored) < min_chars and chunks:
             chunks[-1].text += "\n\n" + chunk_text_restored
@@ -215,6 +263,11 @@ def chunk_text(
                 source_url=source_url,
                 title=title,
                 position=len(chunks),
+                heading_path=h_path,
+                section_title=h_section,
+                doc_title=title,
+                heading_level=h_level,
             ))
 
     return chunks
+

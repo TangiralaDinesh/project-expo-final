@@ -81,6 +81,8 @@ class Learning:
     text: str
     source_url: str = ""
     score: float = 0.0
+    title: str = ""                      # Source document title
+    citation_id: str = ""                # e.g., "[1]" — assigned before synthesis
 
 
 @dataclass

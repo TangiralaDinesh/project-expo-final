@@ -48,6 +48,7 @@ class ThinkingProfile:
     confidence_target: float = 0.75              # Target confidence level
     knowledge_graph_enabled: bool = True         # Query graph for related concepts?
     active_pivot_enabled: bool = True            # Use pivot loop actively?
+    geohash_strategy: str = "progressive"        # "progressive" | "depth_first" | "breadth_first"
     
     # Tracking fields:
     applied_corrections: list[str] = field(default_factory=list)  # Which patterns were applied?

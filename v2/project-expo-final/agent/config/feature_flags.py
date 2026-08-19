@@ -29,7 +29,31 @@ class FeatureFlags:
     bayesian_branching_enabled: bool = False    # Present competing hypotheses to user?
     
     # TIER 4: Code Execution
-    code_execution_enabled: bool = True        # Enable dynamic code generation + execution? (now enabled by default)
+    code_execution_enabled: bool = True        # Enable dynamic code generation + execution?
+    
+    # Phase 2: Query Fan-Out
+    query_fanout_enabled: bool = False          # Generate semantic/angle variants for parallel retrieval?
+    
+    # Phase 5: Gap Scanning
+    gap_scanning_enabled: bool = False          # Proactive "what you didn't know to ask"?
+    
+    # Phase 8: Resonance Scoring
+    resonance_enabled: bool = False             # Use resonance to decide retrieval stop vs continue?
+    
+    # Phase 9: Citations
+    citations_enabled: bool = False             # Assign [N] citation IDs + reference list?
+    
+    # Phase 11: External KG
+    external_kg_enabled: bool = False           # Wikidata/DBpedia/ConceptNet enrichment?
+    
+    # Phase 12: GeoHash Decision Tree
+    geohash_enabled: bool = False               # Progressive depth with intelligent branching?
+    
+    # Phase 13: Self-Directed Tools
+    self_tools_enabled: bool = False            # Agent generates code for its own reasoning?
+    
+    # Phase 14: Bayesian Branch Selection (entropy-based)
+    entropy_branching_enabled: bool = False     # Use Shannon entropy for branch decisions?
     
     @staticmethod
     def all_off() -> FeatureFlags:
@@ -68,7 +92,7 @@ class FeatureFlags:
     
     @staticmethod
     def all_on() -> FeatureFlags:
-        """Full new system (all tiers)"""
+        """Full new system (all tiers + all phases)"""
         return FeatureFlags(
             connectivity_enabled=True,
             active_pivot_enabled=True,
@@ -76,4 +100,25 @@ class FeatureFlags:
             progressive_zoom_enabled=True,
             bayesian_branching_enabled=True,
             code_execution_enabled=True,
+            query_fanout_enabled=True,
+            gap_scanning_enabled=True,
+            resonance_enabled=True,
+            citations_enabled=True,
+            external_kg_enabled=True,
+            geohash_enabled=True,
+            self_tools_enabled=True,
+            entropy_branching_enabled=True,
+        )
+
+    @staticmethod
+    def production() -> FeatureFlags:
+        """Safe production defaults — proven features only"""
+        return FeatureFlags(
+            connectivity_enabled=True,
+            active_pivot_enabled=True,
+            knowledge_graph_queries_enabled=True,
+            code_execution_enabled=True,
+            resonance_enabled=True,
+            citations_enabled=True,
+            query_fanout_enabled=True,
         )

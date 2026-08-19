@@ -42,11 +42,20 @@ from .core.types import Learning
 from .core.reasoning import get_thinking_profile, get_thinking_profile_with_history, EffortBias, classify_prompt_specificity
 from .core.satisfaction import SatisfactionTracker
 from .core.intent_classifier import IntentClassifier
+from .core.resonance import should_continue_retrieval
+from .core.tracing import start_query_trace, end_query_trace, get_current_trace
+from .core.query_fanout import fan_out_query, score_pilot_results, select_queries_by_eig
+from .core.gap_scanner import scan_for_gaps, format_gaps_for_user, _should_run_gap_scan
+from .core.progressive import GeoHashDecisionTree
 from .retrieval.knowledge_coordinator import get_knowledge_coordinator
 from .cache.semantic_cache import get_semantic_cache
 from .blocks.semantic.embed import embed_query
 from .config.feature_flags import FeatureFlags
 from .config.settings import settings
+from .config.budgets import (
+    MAX_SATISFACTION_ROUNDS, MIN_CONCEPT_SATISFACTION,
+    GAP_SCAN_MIN_LEARNINGS, GAP_SCAN_MIN_DEPTH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -334,80 +343,156 @@ async def run_query(
         logger.debug(f"Intent classification failed: {e}, continuing without it")
     
     # ── Stage 2: Run orchestrator to decompose and execute ──
+    # Start tracing
+    trace = start_query_trace(effective_query)
+    root_span = trace.start_span("run_query", mode=gate_result.mode, specificity=specificity)
+
+    # ── Phase 12: Initialize GeoHash Decision Tree ──
+    geohash_tree = GeoHashDecisionTree(effective_query, max_depth=profile.max_depth)
+    # Set strategy based on query type (comparison = breadth_first)
+    if intent_analysis and hasattr(intent_analysis, 'intent'):
+        intent_val = intent_analysis.intent.value if hasattr(intent_analysis.intent, 'value') else str(intent_analysis.intent)
+        if 'compare' in intent_val.lower() or 'compare' in effective_query.lower():
+            geohash_tree.set_strategy("comparison")
+        elif 'explain' in intent_val.lower() or 'how' in effective_query.lower():
+            geohash_tree.set_strategy("focused")
+
+    # ── Phase 2: Query Fan-Out (generate semantic variants) ──
+    async with trace.span("query_fanout") as fanout_span:
+        try:
+            fan_out_plan = await fan_out_query(
+                effective_query, client=client,
+                existing_aspect_queries=None,  # SubqueryGenerator handles this internally
+            )
+            trace.add_attribute(fanout_span, "total_queries", len(fan_out_plan.selected_queries))
+            trace.add_attribute(fanout_span, "dedup_removed", len(fan_out_plan.dedup_removed))
+            logger.info(
+                "Fan-out: %d queries selected (removed %d dupes)",
+                len(fan_out_plan.selected_queries), len(fan_out_plan.dedup_removed),
+            )
+        except Exception as e:
+            logger.warning("Fan-out failed: %s, continuing with original query", e)
+            fan_out_plan = None
+
     # Pass intent analysis to orchestrator for dynamic decomposition
-    orch_results = await run_orchestrator(
-        effective_query,
-        run_subagent=run_subagent,
-        gate_mode=gate_result.mode,
-        client=client,
-        thinking_profile=profile,
-        satisfaction=satisfaction,
-        intent_analysis=intent_analysis,  # NEW: Dynamic intent-aware decomposition
-    )
+    async with trace.span("orchestrator_wave1") as orch_span:
+        orch_results = await run_orchestrator(
+            effective_query,
+            run_subagent=run_subagent,
+            gate_mode=gate_result.mode,
+            client=client,
+            thinking_profile=profile,
+            satisfaction=satisfaction,
+            intent_analysis=intent_analysis,
+        )
+        trace.add_attribute(orch_span, "subagents", len(orch_results))
 
     # ── Collect all learnings ──
     all_learnings, all_urls = _collect_results(orch_results)
 
-    # ── Phase 1B: Evaluate satisfaction and trigger Wave 2 if needed ──
-    wave_2_learnings = []
-    wave_2_urls = []
+    # ── Phase 1: Retrieval Satisfaction Loop with Critique Gate ──
+    # Uses EXISTING SatisfactionTracker + critique.py (were disconnected until now)
     satisfaction_scores = {}
     unsatisfied_concepts = []
-    
-    # Only evaluate satisfaction if tracker is provided
-    if satisfaction:
-        concepts = satisfaction.extract_concepts(effective_query)
-        satisfaction_scores = await satisfaction.evaluate_satisfaction(
-            effective_query, all_learnings, concepts
-        )
-        unsatisfied_concepts = satisfaction.get_unsatisfied_concepts(threshold=0.7)
-    
-    # If any concepts unsatisfied, trigger Wave 2 retrieval
-    if unsatisfied_concepts and satisfaction:
-        logger.info(
-            "Wave 1 satisfaction check: unsatisfied concepts=%s (scores=%s)",
-            unsatisfied_concepts,
-            {c: satisfaction_scores.get(c, 0) for c in unsatisfied_concepts},
-        )
-        
-        try:
-            from .orchestrator.wave_executor import execute_wave_2
-            
-            # Wave 2: Target unsatisfied concepts with specific queries
-            wave_2_tasks = []
-            for concept in unsatisfied_concepts[:3]:  # Max 3 follow-up queries
-                wave_2_task = f"Detailed analysis of {concept} in context of: {effective_query}"
-                wave_2_tasks.append(wave_2_task)
-            
-            # Execute Wave 2 in parallel
-            wave_2_results = await execute_wave_2(
-                tasks=wave_2_tasks,
-                run_subagent=run_subagent,
-                client=client,
-                thinking_profile=profile,
+
+    for retrieval_round in range(MAX_SATISFACTION_ROUNDS):
+        if not satisfaction:
+            break
+
+        async with trace.span(
+            f"satisfaction_round_{retrieval_round + 1}",
+            round=retrieval_round + 1,
+        ) as sat_span:
+            # Evaluate per-concept satisfaction
+            concepts = satisfaction.extract_concepts(effective_query)
+            satisfaction_scores = await satisfaction.evaluate_satisfaction(
+                effective_query, all_learnings, concepts
             )
-            
-            # Merge Wave 2 results
-            wave_2_learnings, wave_2_urls = _collect_results(wave_2_results)
-            all_learnings.extend(wave_2_learnings)
-            all_urls.extend(wave_2_urls)
-            
-            logger.info(
-                "Wave 2 retrieval complete: %d new learnings from %d URLs",
-                len(wave_2_learnings), len(wave_2_urls),
+            unsatisfied_concepts = satisfaction.get_unsatisfied_concepts(
+                threshold=MIN_CONCEPT_SATISFACTION
             )
-            
-            # Re-evaluate satisfaction after Wave 2
-            if satisfaction:
-                satisfaction_scores = await satisfaction.evaluate_satisfaction(
-                    effective_query, all_learnings, satisfaction.extract_concepts(effective_query)
+
+            trace.add_attribute(sat_span, "satisfaction", satisfaction_scores)
+            trace.add_attribute(sat_span, "unsatisfied", unsatisfied_concepts)
+
+            if not unsatisfied_concepts:
+                logger.info("Round %d: All concepts satisfied", retrieval_round + 1)
+                break
+
+            # ── Phase 8: Check resonance before re-retrieving ──
+            if retrieval_round > 0:
+                continue_retrieval, reason = should_continue_retrieval(
+                    existing_learnings=all_learnings[:-len(wave_2_learnings)] if wave_2_learnings else all_learnings,
+                    new_learnings=wave_2_learnings if wave_2_learnings else [],
+                    satisfaction_scores=satisfaction_scores,
+                    min_satisfaction=MIN_CONCEPT_SATISFACTION,
                 )
-                logger.debug("Updated satisfaction after Wave 2: %s", satisfaction_scores)
-            
-        except ImportError:
-            logger.debug("Wave 2 executor not yet implemented, continuing with Wave 1 only")
-        except Exception as e:
-            logger.warning("Wave 2 retrieval failed: %s, continuing with Wave 1 results", e)
+                trace.add_attribute(sat_span, "resonance_decision", reason)
+                if not continue_retrieval:
+                    logger.info("Resonance says stop: %s", reason)
+                    break
+
+            # ── Run critique on retrieval (EXISTING but was disconnected) ──
+            critique_queries = []
+            try:
+                from .core.critique import run_critique_on_retrieval
+                critique_result = await run_critique_on_retrieval(
+                    effective_query, all_learnings, client=client,
+                )
+                if critique_result and hasattr(critique_result, 'suggested_queries'):
+                    critique_queries = critique_result.suggested_queries or []
+                elif critique_result and isinstance(critique_result, dict):
+                    critique_queries = critique_result.get('suggested_queries', [])
+                trace.add_attribute(sat_span, "critique_queries", len(critique_queries))
+            except Exception as e:
+                logger.debug("Critique failed: %s, using concept-based gap queries", e)
+
+            # Build gap-filling queries from unsatisfied concepts + critique
+            gap_queries = critique_queries[:3] if critique_queries else []
+            for concept in unsatisfied_concepts[:3]:
+                if not any(concept.lower() in q.lower() for q in gap_queries):
+                    gap_queries.append(
+                        f"Detailed analysis of {concept} in context of: {effective_query}"
+                    )
+
+            if not gap_queries:
+                break
+
+            logger.info(
+                "Satisfaction round %d: re-retrieving for %d gap queries: %s",
+                retrieval_round + 1, len(gap_queries), gap_queries[:3],
+            )
+
+            # Execute Wave 2 retrieval
+            wave_2_learnings = []
+            wave_2_urls = []
+            try:
+                wave_2_results = await run_orchestrator(
+                    " | ".join(gap_queries[:3]),
+                    run_subagent=run_subagent,
+                    gate_mode=gate_result.mode,
+                    client=client,
+                    thinking_profile=profile,
+                )
+                wave_2_learnings, wave_2_urls = _collect_results(wave_2_results)
+                all_learnings.extend(wave_2_learnings)
+                all_urls.extend(wave_2_urls)
+                logger.info(
+                    "Wave %d complete: +%d learnings, +%d URLs",
+                    retrieval_round + 2, len(wave_2_learnings), len(wave_2_urls),
+                )
+            except Exception as e:
+                logger.warning("Re-retrieval round %d failed: %s", retrieval_round + 1, e)
+                break
+
+    # ── Phase 12: Record GeoHash exploration path ──
+    if satisfaction_scores:
+        geohash_tree.next_character(
+            branches=list(satisfaction_scores.keys()),
+            branch_scores=satisfaction_scores,
+            satisfaction_scores=satisfaction_scores,
+        )
+        trace.add_attribute(root_span, "geohash_path", geohash_tree.geohash_string)
 
     # ── Stage 3: CRAG grading + synthesis ──
     # Tier 2: Zoom filtering is OPT-IN (v1 behavior: use all learnings by default)
@@ -451,19 +536,21 @@ async def run_query(
                 len(all_learnings),
             )
     
+    # ── Phase 9: Assign citation IDs before synthesis ──
+    for i, learning in enumerate(learnings_for_synthesis):
+        learning.citation_id = f"[{i + 1}]"
+
     if learnings_for_synthesis:
         grade = await grade_retrieval(effective_query, learnings_for_synthesis, client=client)
         stats = get_correction_stats()
         stats.total_queries += 1
 
         if grade.grade == RetrievalGrade.CORRECT:
-            # Use learnings as-is
             answer = await global_synthesis_llm(
                 effective_query, learnings_for_synthesis, client=client,
                 prompt_specificity=profile.prompt_specificity,
             )
         elif grade.grade == RetrievalGrade.INCORRECT:
-            # Discard learnings, direct answer + disclaimer
             stats.corrected_count += 1
             logger.warning("CRAG: retrieval graded INCORRECT, discarding. Reason: %s", grade.reason)
             answer = await direct_answer_llm(
@@ -477,7 +564,6 @@ async def run_query(
             learnings_for_synthesis = []
             all_urls = []
         else:
-            # AMBIGUOUS — keep learnings but note uncertainty
             stats.corrected_count += 1
             answer = await global_synthesis_llm(
                 effective_query, learnings_for_synthesis, client=client,
@@ -493,6 +579,44 @@ async def run_query(
             "⚠️ Note: Live search returned limited results. This answer is based on "
             "general knowledge and may not reflect the most current information.\n\n" + answer
         )
+
+    # ── Phase 9: Build citation reference list ──
+    if learnings_for_synthesis:
+        citation_lines = []
+        seen_urls = set()
+        for learning in learnings_for_synthesis:
+            if learning.citation_id and learning.source_url and learning.source_url not in seen_urls:
+                title = learning.title or learning.source_url
+                citation_lines.append(f"{learning.citation_id} {title} — {learning.source_url}")
+                seen_urls.add(learning.source_url)
+        if citation_lines:
+            answer += "\n\n---\n**Sources:**\n" + "\n".join(citation_lines)
+
+    # ── Phase 5: Proactive Gap Scanning ──
+    if _should_run_gap_scan(
+        learnings_count=len(all_learnings),
+        max_depth=profile.max_depth,
+        gate_mode=gate_result.mode,
+    ):
+        try:
+            async with trace.span("gap_scanning") as gap_span:
+                gap_result = await scan_for_gaps(
+                    effective_query, all_learnings, client=client,
+                )
+                trace.add_attribute(gap_span, "gaps_found", len(gap_result.gaps))
+                trace.add_attribute(gap_span, "should_present", gap_result.should_present)
+                if gap_result.should_present:
+                    gap_text = format_gaps_for_user(gap_result)
+                    if gap_text:
+                        answer += gap_text
+        except Exception as e:
+            logger.debug("Gap scanning failed: %s", e)
+
+    # ── End tracing ──
+    trace.end_span(root_span, status="ok",
+                   learnings_count=len(all_learnings),
+                   sources_count=len(all_urls))
+    final_trace = end_query_trace()
 
     # Detect file creation opportunities (Tier 4 UX enhancement)
     can_create_file, file_types, file_reason = _suggest_file_creation(

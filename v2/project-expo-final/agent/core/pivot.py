@@ -95,6 +95,8 @@ async def run_pivot_loop(
     
     # Check if branching should be offered
     branching_options: list[BranchingOption] = []
+    speculative_question = ""
+
     if branching_enabled and h_b:
         confidence_gap = h_a.prior - h_b.prior
         
@@ -111,7 +113,24 @@ async def run_pivot_loop(
                 )
                 for h in [h_a, h_b]
             ]
-    
+
+            # Phase 14: Generate speculative question for disambiguation
+            try:
+                from .speculative import generate_speculative_questions, select_best_question
+                spec_questions = await generate_speculative_questions(
+                    hypotheses[:4], context=goal,
+                )
+                best_q = select_best_question(spec_questions)
+                if best_q:
+                    speculative_question = best_q.question
+                    # Attach to first branching option as guidance
+                    if branching_options:
+                        branching_options[0].explanation += (
+                            f"\n\n💡 To help decide: {speculative_question}"
+                        )
+            except Exception:
+                pass  # Speculative questions are optional
+
     # Auto-select top hypothesis
     confirmed = h_a
     
@@ -124,3 +143,4 @@ async def run_pivot_loop(
         ),
         branching_options
     )
+

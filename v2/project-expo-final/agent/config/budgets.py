@@ -28,9 +28,9 @@ INFO_GAIN_THRESHOLD = 0.3        # minimum delta to justify another recursion le
 # ---------------------------------------------------------------------------
 EMBED_DIM = 512                  # Matryoshka truncation dimension
 EMBED_BATCH_SIZE = 16            # texts per API call
-MAX_CHUNK_CHARS = 4000           # max chars per chunk before splitting
-MIN_CHUNK_CHARS = 100            # chunks smaller than this get merged with neighbors
-CHUNK_OVERLAP_RATIO = 0.1        # 10% overlap between consecutive chunks
+MAX_CHUNK_CHARS = 1500           # ~375 words — matches AI Mode's chunk size for passage-level reranking
+MIN_CHUNK_CHARS = 80             # chunks smaller than this get merged with neighbors
+CHUNK_OVERLAP_RATIO = 0.15       # 15% overlap (more overlap needed with smaller chunks)
 
 # ---------------------------------------------------------------------------
 # Reranking
@@ -78,3 +78,24 @@ AIOHTTP_TOTAL_CONNECTIONS = 30
 AIOHTTP_PER_HOST = 10
 AIOHTTP_KEEPALIVE_S = 30
 AIOHTTP_DNS_CACHE_S = 300
+
+# ---------------------------------------------------------------------------
+# Retrieval satisfaction loop
+# ---------------------------------------------------------------------------
+MAX_SATISFACTION_ROUNDS = 2      # max re-retrieval rounds after initial retrieval
+MIN_CONCEPT_SATISFACTION = 0.6   # per-concept satisfaction threshold for re-retrieval
+CRITIQUE_CONSENSUS_THRESHOLD = 0.5  # 2+ of 4 personas must agree gaps exist
+
+# ---------------------------------------------------------------------------
+# Gap scanning
+# ---------------------------------------------------------------------------
+GAP_SCAN_MIN_LEARNINGS = 5      # minimum learnings before gap scan fires
+GAP_SCAN_MIN_DEPTH = 3          # minimum max_depth before gap scan fires
+GAP_SCAN_MAX_ITEMS = 3          # maximum gap items to present
+
+# ---------------------------------------------------------------------------
+# Query fan-out
+# ---------------------------------------------------------------------------
+FAN_OUT_MAX_QUERIES = 7          # maximum total sub-queries after dedup
+FAN_OUT_DEDUP_THRESHOLD = 0.75   # cosine similarity threshold for dedup
+FAN_OUT_PILOT_EXPAND_RATIO = 0.5 # expand top 50% of pilot results

@@ -114,10 +114,9 @@ def _calculate_adaptive_max_tokens(
         * specificity_factor
     )
     
-    # Clamp to reasonable bounds: min 4000, max 16000
-    # (allowing for very complex queries to get full responses without truncation)
-    # Increased from 2000 to 4000 to prevent mid-response cutoff on synthesis
-    return min(max(adaptive_limit, 4000), 16000)
+    # Clamp to reasonable bounds: min 6000, max 16000
+    # Increased from 4000 to 6000 to prevent mid-response cutoff on deep synthesis
+    return min(max(adaptive_limit, 6000), 16000)
 
 
 def _detect_truncation(response: str) -> bool:
@@ -162,7 +161,8 @@ def _build_synthesis_prompt(
     with prompt-specificity hint for depth calibration."""
     ordered = sorted(learnings, key=lambda l: l.score, reverse=True)
     learnings_block = "\n\n".join(
-        f"- [{l.source_url or 'source unknown'}] {l.text}" for l in ordered
+        f"- {getattr(l, 'citation_id', '')} [{l.source_url or 'source unknown'}] {l.text}"
+        for l in ordered
     ) or "(no learnings gathered)"
 
     specificity_hint = ""
@@ -204,8 +204,27 @@ async def global_synthesis_llm(
     response = await client.chat(
         messages,
         temperature=0.2,
-        max_tokens=adaptive_tokens,  # Now properly adaptive!
+        max_tokens=adaptive_tokens,
     )
+    
+    # Phase 6: Auto-continuation if truncation detected
+    if _detect_truncation(response):
+        logger.info("Truncation detected, issuing continuation call")
+        continuation_messages = messages + [
+            {"role": "assistant", "content": response},
+            {"role": "user", "content": "Continue from where you stopped. Do not repeat what you already said."},
+        ]
+        try:
+            continuation = await client.chat(
+                continuation_messages,
+                temperature=0.2,
+                max_tokens=min(adaptive_tokens, 4000),  # Shorter continuation
+            )
+            if continuation and continuation.strip():
+                response = response.rstrip() + "\n\n" + continuation.lstrip()
+                logger.info("Continuation merged: +%d chars", len(continuation))
+        except Exception as e:
+            logger.warning("Continuation call failed: %s", e)
     
     return response
 

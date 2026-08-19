@@ -44,7 +44,11 @@ Given the original query, retrieved chunks, current depth, and max depth, decide
 
 3. NEEDS_CODE: Is the gap code-shaped? (needs implementation examples, not docs)
 
-4. REQUEST_EXTENSION: ONLY if depth == max_depth AND what you just found is
+4. NEEDS_COMPUTATION: Is the gap computation-shaped? (needs calculation, date math,
+   data parsing, verification — NOT more documents). If yes, the system will generate
+   and execute code to answer this gap.
+
+5. REQUEST_EXTENSION: ONLY if depth == max_depth AND what you just found is
    unusually high-value (a concrete lead, not just "could dig more"). This
    should fire RARELY.
 
@@ -55,6 +59,7 @@ Respond with ONLY a JSON object:
   "next_queries": ["query1", "query2"],
   "next_mode": null or "public" or "kb",
   "needs_code_retriever": false,
+  "needs_computation": false,
   "request_extension": false,
   "extension_justification": "",
   "is_comparison_query": false,
@@ -72,6 +77,8 @@ def _parse_decision(raw: str) -> dict:
             parsed["underexplored_entities"] = []
         if "entity_coverage_balance" not in parsed:
             parsed["entity_coverage_balance"] = 1.0
+        if "needs_computation" not in parsed:
+            parsed["needs_computation"] = False
         # Validate coverage balance
         balance = parsed.get("entity_coverage_balance", 1.0)
         if not isinstance(balance, (int, float)) or balance < 0:
@@ -198,4 +205,5 @@ def _to_decision(parsed: dict) -> Decision:
         extension_justification=parsed.get("extension_justification", ""),
         is_comparison_query=is_comparison,
         underexplored_entities=underexplored,
+        needs_computation=parsed.get("needs_computation", False),
     )

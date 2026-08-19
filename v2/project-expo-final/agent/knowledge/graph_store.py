@@ -40,6 +40,11 @@ class Triple:
     object: str            # e.g. "Eva Braun"
     source_url: str = ""   # provenance
     confidence: float = 1.0
+    # Phase 11: Extended fields for external KG integration
+    valid_from: str = ""   # Temporal validity start (ISO format)
+    valid_to: str = ""     # Temporal validity end (ISO format)
+    weight: float = 1.0    # Relationship importance weight
+    triple_type: str = ""  # "subclass_of", "instance_of", "temporal_of", ""
 
 
 @dataclass
@@ -69,6 +74,59 @@ class GraphStore:
     @property
     def triple_count(self) -> int:
         return sum(len(triples) for triples in self._adjacency.values())
+
+    def get_concept_hierarchy(self, entity: str) -> list[Triple]:
+        """Get subclass_of / instance_of chain for an entity.
+
+        Returns triples like:
+            Python → instance_of → programming language
+            programming language → subclass_of → formal language
+        """
+        key = entity.lower().strip()
+        hierarchy = []
+        visited = {key}
+        queue = [key]
+
+        while queue:
+            current = queue.pop(0)
+            for t in self._adjacency.get(current, []):
+                if t.predicate.lower() in ("instance_of", "subclass_of"):
+                    hierarchy.append(t)
+                    obj_key = t.object.lower().strip()
+                    if obj_key not in visited:
+                        visited.add(obj_key)
+                        queue.append(obj_key)
+
+        return hierarchy
+
+    def query_by_relationship_type(
+        self, entity: str, relationship: str, hops: int = 1
+    ) -> list[Triple]:
+        """Query triples filtered by relationship type.
+
+        Args:
+            entity: Entity to start from
+            relationship: Relationship type filter (e.g., "subclass_of")
+            hops: How many hops to traverse
+        """
+        key = entity.lower().strip()
+        results = []
+        visited = {key}
+        frontier = [key]
+
+        for _ in range(hops):
+            next_frontier = []
+            for node in frontier:
+                for t in self._adjacency.get(node, []):
+                    if t.predicate.lower() == relationship.lower():
+                        results.append(t)
+                        obj_key = t.object.lower().strip()
+                        if obj_key not in visited:
+                            visited.add(obj_key)
+                            next_frontier.append(obj_key)
+            frontier = next_frontier
+
+        return results
 
     def add_triples(self, triples: list[Triple]):
         """Add triples to the graph. Deduplicates by (subject, predicate, object)."""

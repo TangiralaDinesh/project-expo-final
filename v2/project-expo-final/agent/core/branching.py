@@ -172,3 +172,180 @@ class BranchingContext:
         self.user_clarification = clarification
         logger.info(f"Branching {self.decision_id} resolved: "
                    f"selection={selection_idx}, clarification={clarification[:50]}")
+
+
+# ── Phase 14: Bayesian Branch Selection ──
+
+
+def compute_branch_entropy(options: list) -> float:
+    """Compute Shannon entropy across branching options.
+
+    High entropy = options equally likely = high ambiguity → ask user
+    Low entropy = one option dominates = low ambiguity → auto-select
+
+    Args:
+        options: List of BranchingOption objects with .confidence field
+
+    Returns:
+        Normalized entropy (0-1)
+    """
+    import math
+
+    if not options or len(options) < 2:
+        return 0.0
+
+    confidences = [getattr(opt, "confidence", 0.5) for opt in options]
+    total = sum(confidences) or 1.0
+    probs = [c / total for c in confidences]
+
+    entropy = 0.0
+    for p in probs:
+        if p > 0:
+            entropy -= p * math.log2(p)
+
+    max_entropy = math.log2(len(options))
+    return entropy / max_entropy if max_entropy > 0 else 0.0
+
+
+async def bayesian_branch_selection(
+    branches: list,
+    learnings: list,
+    query: str,
+    *,
+    client=None,
+) -> BranchingDecision:
+    """Use information entropy to decide between branches.
+
+    Decision matrix:
+    1. Low entropy (one branch dominates) → auto-select
+    2. High entropy (branches close) → compute which QUESTION would most
+       reduce entropy if answered → present THAT question to user
+
+    This is Bayesian optimal experiment design:
+    - Each branch is a hypothesis
+    - Each speculative question is an "experiment"
+    - Pick the experiment that maximizes expected information gain
+
+    Args:
+        branches: BranchingOption objects to choose between
+        learnings: Current learnings for context
+        query: Original query
+
+    Returns:
+        BranchingDecision with auto-selection or user-prompt
+    """
+    if not branches:
+        return BranchingDecision(
+            decision_type=BranchingDecisionType.AUTOMATIC,
+            confidence=1.0,
+        )
+
+    if len(branches) == 1:
+        return BranchingDecision(
+            decision_type=BranchingDecisionType.AUTOMATIC,
+            selected_hypothesis_idx=0,
+            confidence=getattr(branches[0], "confidence", 0.8),
+        )
+
+    entropy = compute_branch_entropy(branches)
+
+    # Get confidence-sorted indices
+    indexed = sorted(
+        enumerate(branches),
+        key=lambda x: getattr(x[1], "confidence", 0),
+        reverse=True,
+    )
+
+    top_idx, top_branch = indexed[0]
+    second_idx, second_branch = indexed[1]
+
+    top_conf = getattr(top_branch, "confidence", 0.5)
+    second_conf = getattr(second_branch, "confidence", 0.5)
+    gap = top_conf - second_conf
+
+    logger.info(
+        "Bayesian branch selection: entropy=%.3f, gap=%.3f, "
+        "top=%s(%.2f), second=%s(%.2f)",
+        entropy, gap,
+        getattr(top_branch, "label", "?"), top_conf,
+        getattr(second_branch, "label", "?"), second_conf,
+    )
+
+    # Low entropy or clear winner → auto-select
+    if entropy < 0.5 or gap > 0.25 or top_conf > 0.85:
+        return BranchingDecision(
+            decision_type=BranchingDecisionType.AUTOMATIC,
+            selected_hypothesis_idx=top_idx,
+            confidence=top_conf,
+            confidence_gap=gap,
+        )
+
+    # High entropy → generate discriminating question
+    discriminating_question = await _generate_discriminating_question(
+        branches, query, learnings, client=client,
+    )
+
+    decision = BranchingDecision(
+        decision_type=BranchingDecisionType.PRESENTED,
+        presented_options=branches,
+        confidence_gap=gap,
+    )
+
+    # Store the discriminating question in metadata
+    if discriminating_question:
+        decision.user_reasoning = discriminating_question
+
+    return decision
+
+
+async def _generate_discriminating_question(
+    branches: list,
+    query: str,
+    learnings: list,
+    *,
+    client=None,
+) -> str:
+    """Generate the single question that would most discriminate between branches.
+
+    This is the EIG principle applied to branch disambiguation:
+    "If I could ask the user ONE question, which question would most
+    reduce my uncertainty about which branch is correct?"
+    """
+    if client is None:
+        from ..llm.client import get_client
+        client = get_client()
+
+    branch_descriptions = "\n".join(
+        f"Option {i+1}: {getattr(b, 'label', str(b))} — "
+        f"{getattr(b, 'explanation', '')} (confidence: {getattr(b, 'confidence', 0):.0%})"
+        for i, b in enumerate(branches)
+    )
+
+    prompt = f"""I'm trying to answer: "{query}"
+
+I have {len(branches)} possible approaches but can't decide between them:
+
+{branch_descriptions}
+
+Generate the SINGLE most discriminating question I could ask the user that would make one option clearly better than the others.
+
+The question should:
+1. Be specific and actionable (not "what do you prefer?")
+2. Have answers that clearly favor one option over another
+3. Address the KEY difference between options
+
+Return ONLY the question, no explanation."""
+
+    try:
+        response = await client.chat_worker(
+            [{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=100,
+        )
+        question = response.strip().strip('"').strip("'")
+        logger.info("Generated discriminating question: %s", question[:80])
+        return question
+    except Exception as e:
+        logger.warning("Discriminating question generation failed: %s", e)
+        return ""
+

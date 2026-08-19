@@ -173,5 +173,18 @@ def _rrf_rerank(
     for i in range(len(chunks)):
         chunks[i].score = _rrf_score(dense_rank[i]) + _rrf_score(sparse_rank[i])
 
+    # Phase 3: Heading-aware scoring boost
+    # Chunks from sections whose heading matches query terms get a boost
+    query_terms_lower = set(query.lower().split())
+    for chunk in chunks:
+        if chunk.section_title or chunk.heading_path:
+            heading_text = f"{chunk.section_title} {chunk.heading_path}".lower()
+            heading_terms = set(heading_text.split())
+            overlap = query_terms_lower & heading_terms
+            if overlap:
+                # Boost proportional to how many query terms match the heading
+                boost = len(overlap) / len(query_terms_lower) * 0.15  # max 15% boost
+                chunk.score *= (1.0 + boost)
+
     chunks.sort(key=lambda c: c.score, reverse=True)
     return chunks[:top_k]

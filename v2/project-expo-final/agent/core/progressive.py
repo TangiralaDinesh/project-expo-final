@@ -272,3 +272,204 @@ _TEXT_EXTENSIONS = {
 def _is_text_file(filename: str) -> bool:
     _, ext = os.path.splitext(filename.lower())
     return ext in _TEXT_EXTENSIONS or not ext  # extensionless = probably text
+
+
+# ── Phase 12: GeoHash Decision Tree ──
+# THE core differentiator. Traditional AI answers specifically → this agent shows
+# the MAP first (overview), then user zooms in for specificity. Each "character"
+# added to the geohash string is a decision about WHICH direction to go deeper.
+# The choice is from a GROUP of options, selected by information entropy OR
+# presented to the user when ambiguous.
+
+
+@dataclass
+class GeoHashStep:
+    """One step in the geohash progressive depth exploration."""
+    depth: int                          # Current depth (0 = overview)
+    available_branches: list[str]       # All possible directions at this depth
+    chosen_branch: Optional[str]        # Which branch was chosen (None if needs user input)
+    reason: str                         # Why this branch was chosen
+    needs_user_input: bool              # True if branches too ambiguous → ask user
+    entropy: float                      # Information entropy across branches (high = ambiguous)
+    satisfaction: dict[str, float]      # Per-concept satisfaction at this depth
+
+
+class GeoHashDecisionTree:
+    """Manages progressive depth-first exploration with intelligent branching.
+
+    The geohash analogy:
+      Character 1: Broad domain identification
+        "should I buy CDSL or EMVEE?" → domain = "Indian stock market"
+      Character 2: Entity decomposition
+        → entities = ["CDSL", "EMVEE"] — each entity = a branch
+      Character 3: Aspect selection (PER ENTITY)
+        → CDSL: [pricing, fundamentals, risk] — EIG selects highest-value
+      Character 4+: Depth within aspect
+        → CDSL pricing: [current price, PE ratio, dividend yield]
+
+    Each "character" is NOT fixed — it's chosen from a GROUP of options based on:
+    1. Information entropy — which branch reduces uncertainty most?
+    2. User-guided — if branches ambiguous (conf gap < 0.25), present to user
+    3. Retrieval-informed — what we found shapes what to explore next
+    """
+
+    def __init__(self, query: str, max_depth: int = 4):
+        self.query = query
+        self.max_depth = max_depth
+        self.depth: int = 0
+        self.path: list[str] = []                      # The "geohash string" built so far
+        self.branches_at_depth: dict[int, list[str]] = {}
+        self.chosen_at_depth: dict[int, str] = {}
+        self.steps: list[GeoHashStep] = []
+        self.strategy: str = "progressive"             # "progressive" | "depth_first" | "breadth_first"
+
+    def set_strategy(self, query_type: str):
+        """Set traversal strategy based on query type.
+
+        - "progressive" (default): Overview first, zoom based on entropy/user
+        - "depth_first": Go deep on first entity before next (focused queries)
+        - "breadth_first": Cover all entities at surface first (comparisons)
+        """
+        if query_type == "comparison":
+            self.strategy = "breadth_first"
+        elif query_type == "focused":
+            self.strategy = "depth_first"
+        else:
+            self.strategy = "progressive"
+
+    def add_branches(self, depth: int, branches: list[str]):
+        """Register available branches at a given depth."""
+        self.branches_at_depth[depth] = branches
+
+    def next_character(
+        self,
+        branches: list[str],
+        branch_scores: Optional[dict[str, float]] = None,
+        satisfaction_scores: Optional[dict[str, float]] = None,
+        ambiguity_threshold: float = 0.25,
+    ) -> GeoHashStep:
+        """Decide the next 'character' — which direction to go deeper.
+
+        Args:
+            branches: Available directions to explore
+            branch_scores: {branch: confidence_score} from EIG or retrieval
+            satisfaction_scores: Per-concept satisfaction from SatisfactionTracker
+            ambiguity_threshold: If score gap < this, ask user
+
+        Returns:
+            GeoHashStep with decision
+        """
+        import math
+
+        self.branches_at_depth[self.depth] = branches
+
+        if not branches:
+            step = GeoHashStep(
+                depth=self.depth,
+                available_branches=[],
+                chosen_branch=None,
+                reason="no_branches_available",
+                needs_user_input=False,
+                entropy=0.0,
+                satisfaction=satisfaction_scores or {},
+            )
+            self.steps.append(step)
+            return step
+
+        scores = branch_scores or {b: 1.0 / len(branches) for b in branches}
+
+        # Normalize scores to probabilities
+        total = sum(scores.values()) or 1.0
+        probs = {b: scores.get(b, 0) / total for b in branches}
+
+        # Compute Shannon entropy
+        entropy = 0.0
+        for p in probs.values():
+            if p > 0:
+                entropy -= p * math.log2(p)
+        max_entropy = math.log2(len(branches)) if len(branches) > 1 else 1.0
+        normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0.0
+
+        # Decision logic
+        sorted_branches = sorted(branches, key=lambda b: scores.get(b, 0), reverse=True)
+
+        if len(sorted_branches) == 1:
+            # Only one option
+            chosen = sorted_branches[0]
+            needs_user = False
+            reason = "single_branch"
+        elif len(sorted_branches) >= 2:
+            top_score = scores.get(sorted_branches[0], 0)
+            second_score = scores.get(sorted_branches[1], 0)
+            gap = top_score - second_score
+
+            if gap < ambiguity_threshold and top_score < 0.85:
+                # Ambiguous — present to user
+                chosen = None
+                needs_user = True
+                reason = (
+                    f"ambiguous_branches: gap={gap:.3f} (top={sorted_branches[0]}: "
+                    f"{top_score:.2f}, second={sorted_branches[1]}: {second_score:.2f})"
+                )
+            else:
+                # Clear winner
+                chosen = sorted_branches[0]
+                needs_user = False
+                reason = f"entropy_selected: {chosen} (score={top_score:.2f}, entropy={normalized_entropy:.2f})"
+        else:
+            chosen = sorted_branches[0] if sorted_branches else None
+            needs_user = False
+            reason = "default"
+
+        # Breadth-first override for comparisons: explore all entities at surface level
+        if self.strategy == "breadth_first" and self.depth <= 1:
+            chosen = None  # Don't pick one — do all at this depth
+            needs_user = False
+            reason = f"breadth_first_strategy: exploring all {len(branches)} branches at depth {self.depth}"
+
+        step = GeoHashStep(
+            depth=self.depth,
+            available_branches=branches,
+            chosen_branch=chosen,
+            reason=reason,
+            needs_user_input=needs_user,
+            entropy=normalized_entropy,
+            satisfaction=satisfaction_scores or {},
+        )
+
+        # Record choice
+        if chosen:
+            self.path.append(chosen)
+            self.chosen_at_depth[self.depth] = chosen
+        self.steps.append(step)
+        self.depth += 1
+
+        return step
+
+    @property
+    def geohash_string(self) -> str:
+        """The 'geohash string' built so far — human-readable depth path."""
+        return " → ".join(self.path) if self.path else "(root)"
+
+    def get_exploration_summary(self) -> dict:
+        """Summary of the exploration tree for tracing."""
+        return {
+            "query": self.query,
+            "strategy": self.strategy,
+            "depth_reached": self.depth,
+            "path": self.path,
+            "branches_per_depth": {
+                d: len(b) for d, b in self.branches_at_depth.items()
+            },
+            "steps": [
+                {
+                    "depth": s.depth,
+                    "branches": len(s.available_branches),
+                    "chosen": s.chosen_branch,
+                    "needs_user": s.needs_user_input,
+                    "entropy": round(s.entropy, 3),
+                }
+                for s in self.steps
+            ],
+        }
+
