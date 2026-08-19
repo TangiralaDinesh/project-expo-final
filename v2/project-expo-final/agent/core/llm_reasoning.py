@@ -65,12 +65,16 @@ class ReasoningDecision:
 
 # ── Entity-Specific Question Generation ──
 
-_ENTITY_QUESTIONS_PROMPT = """Generate targeted search queries per entity to answer: "{query}"
-Entities: {entities}
+_ENTITY_QUESTIONS_PROMPT = """I need to answer this question: "{query}"
 
-DON'T search entity names. Generate SPECIFIC queries for the data needed.
-Be concise. JSON only:
-{{"plans":[{{"entity":"name","search_queries":["query1","query2"],"priority":0.9,"reasoning":"why"}}]}}"""
+The key entities involved are: {entities}
+
+For EACH entity, generate 2 specific web search queries that will retrieve the exact data I need to answer the question. Do NOT just search the entity name — search for the specific facts needed.
+
+Example: If question is "who sold more albums, Drake or Kanye" and entities are ["Drake", "Kanye West"]:
+{{"plans":[{{"entity":"Drake","search_queries":["Drake total album sales worldwide certified units","Drake discography Billboard chart records"],"priority":0.9,"reasoning":"Need Drake album sales data"}},{{"entity":"Kanye West","search_queries":["Kanye West total album sales worldwide certified","Kanye West discography sales records"],"priority":0.9,"reasoning":"Need Kanye sales data for comparison"}}]}}
+
+Now generate for MY question. Return valid JSON only:"""
 
 
 async def generate_entity_research_plans(
@@ -111,21 +115,37 @@ async def generate_entity_research_plans(
         
         parsed = _parse_json(response)
         if not parsed or "plans" not in parsed:
+            logger.warning("LLM returned invalid JSON, using fallback")
             return _fallback_entity_plans(query, entities)
         
         plans = []
         for p in parsed["plans"]:
+            entity_name = p.get("entity", "")
+            search_qs = p.get("search_queries", [])
+            
+            # VALIDATION: Reject if LLM echoed template placeholders
+            template_words = {"query1", "query2", "q1", "q2", "name", "entity name"}
+            if entity_name.lower() in template_words:
+                logger.warning("LLM echoed template (entity='%s'), using fallback", entity_name)
+                return _fallback_entity_plans(query, entities)
+            if any(sq.lower().strip() in template_words for sq in search_qs):
+                logger.warning("LLM echoed template queries %s, using fallback", search_qs)
+                return _fallback_entity_plans(query, entities)
+            
             plans.append(EntityResearchPlan(
-                entity=p.get("entity", ""),
+                entity=entity_name,
                 questions=p.get("questions", []),
-                search_queries=p.get("search_queries", [f"{p.get('entity', '')} {query}"]),
+                search_queries=search_qs if search_qs else [f"{entity_name} {query}"],
                 priority=float(p.get("priority", 0.5)),
                 reasoning=p.get("reasoning", ""),
             ))
         
+        if not plans:
+            return _fallback_entity_plans(query, entities)
+        
         logger.info(
             "Entity research plans: %s",
-            [(p.entity, len(p.search_queries)) for p in plans],
+            [(p.entity, p.search_queries[:2]) for p in plans],
         )
         return plans
         
@@ -135,31 +155,67 @@ async def generate_entity_research_plans(
 
 
 def _fallback_entity_plans(query: str, entities: list[str]) -> list[EntityResearchPlan]:
-    """Rule-based fallback when LLM fails."""
+    """Rule-based fallback when LLM fails — generates targeted queries from query context."""
+    # Extract what's being compared from the query
+    query_lower = query.lower()
+    comparison_aspects = []
+    
+    # Common comparison keywords → search terms
+    aspect_keywords = {
+        "blockbuster": "blockbuster movies box office gross",
+        "box office": "box office gross worldwide revenue",
+        "album": "albums total sales certified units",
+        "movie": "movies filmography box office",
+        "net worth": "net worth earnings salary",
+        "award": "awards nominations wins",
+        "hit": "hit songs movies chart performance",
+        "record": "records achievements milestones",
+        "salary": "salary earnings income",
+        "height": "height physical stats",
+        "age": "age birthday born",
+        "popular": "popularity social media followers fans",
+    }
+    
+    for keyword, aspect in aspect_keywords.items():
+        if keyword in query_lower:
+            comparison_aspects.append(aspect)
+    
+    if not comparison_aspects:
+        comparison_aspects = ["key facts statistics data"]
+    
     plans = []
     for entity in entities:
+        search_queries = []
+        for aspect in comparison_aspects[:2]:
+            search_queries.append(f"{entity} {aspect}")
+        # Always add a combined query
+        search_queries.append(f"{entity} {query}")
+        
         plans.append(EntityResearchPlan(
             entity=entity,
-            questions=[f"What are the key facts about {entity}?"],
-            search_queries=[
-                f"{entity} {query}",
-                f"{entity} detailed facts data statistics",
-            ],
+            questions=[f"What are {entity}'s key metrics for: {query}?"],
+            search_queries=search_queries[:3],
             priority=0.7,
-            reasoning="Fallback: generic entity search",
+            reasoning=f"Fallback: targeted search for {entity}",
         ))
     return plans
 
 
 # ── LLM Learning Evaluation ──
 
-_EVALUATE_PROMPT = """Does this data answer "{query}"? Be brutally honest.
+_EVALUATE_PROMPT = """Does the following retrieved data actually answer this question: "{query}"?
 
-Learnings:
+Retrieved data:
 {learnings_text}
 
-JSON only:
-{{"sufficient":bool,"confidence":0.8,"quality_score":0.6,"missing_aspects":["gap1"],"follow_up_queries":["query1"],"reasoning":"why"}}"""
+Judge honestly:
+- "sufficient": true if this data can answer the question well, false if critical info is missing
+- "quality_score": 0.0 (completely irrelevant) to 1.0 (perfect answer)
+- "missing_aspects": list what specific information is still missing
+- "follow_up_queries": web search queries that would find the missing data
+
+Return valid JSON:
+{{"sufficient": false, "confidence": 0.7, "quality_score": 0.3, "missing_aspects": ["box office revenue data", "filmography details"], "follow_up_queries": ["Tom Holland movies box office gross worldwide", "Zendaya filmography earnings"], "reasoning": "The data contains general mentions but lacks specific box office numbers needed to compare"}}"""
 
 
 async def evaluate_learnings(
@@ -208,12 +264,20 @@ async def evaluate_learnings(
         if not parsed:
             return _heuristic_evaluation(query, learnings)
         
+        # Filter out template placeholder queries
+        raw_followup = parsed.get("follow_up_queries", [])
+        template_indicators = {"query1", "query2", "q1", "q2", "search query 1", "search query 2"}
+        clean_followup = [
+            q for q in raw_followup
+            if q.strip() and q.lower().strip() not in template_indicators and len(q) > 5
+        ]
+        
         return LearningEvaluation(
             sufficient=parsed.get("sufficient", False),
             confidence=float(parsed.get("confidence", 0.5)),
             missing_aspects=parsed.get("missing_aspects", []),
             quality_score=float(parsed.get("quality_score", 0.5)),
-            follow_up_queries=parsed.get("follow_up_queries", []),
+            follow_up_queries=clean_followup,
             reasoning=parsed.get("reasoning", ""),
         )
         
@@ -246,11 +310,13 @@ def _heuristic_evaluation(query: str, learnings: list) -> LearningEvaluation:
 
 # ── Reasoning Decision (Stop/Continue/Pivot) ──
 
-_DECISION_PROMPT = """Query: "{query}" | Learnings: {num_learnings} | Quality: {quality_score:.1f} | Round: {round_num} | Time: {elapsed_s:.0f}s
-Missing: {missing}
+_DECISION_PROMPT = """I'm researching: "{query}"
+Status: {num_learnings} learnings collected | quality: {quality_score:.1f}/1.0 | round: {round_num} | {elapsed_s:.0f}s elapsed
+Missing info: {missing}
 {kg_context}
-Action? stop/continue/pivot/dig_deeper. If continue, provide 2 search queries.
-JSON: {{"action":"continue","queries":["q1","q2"],"confidence":0.7,"reasoning":"why"}}"""
+
+Should I continue searching or stop? If continue, give me 2 specific web search queries to find the missing data.
+Return JSON: {{"action": "continue", "queries": ["Tom Holland Spider-Man box office worldwide gross", "Zendaya movies total earnings revenue"], "confidence": 0.6, "reasoning": "Need specific revenue numbers to compare"}}"""
 
 
 async def decide_next_action(
@@ -319,15 +385,24 @@ async def decide_next_action(
             return ReasoningDecision(
                 action="stop" if quality_score > 0.6 else "continue",
                 target="",
-                queries=[query + " more details"] if quality_score <= 0.6 else [],
+                queries=[query + " detailed facts data"] if quality_score <= 0.6 else [],
                 confidence=0.4,
                 reasoning="JSON parse failed, using heuristic",
             )
         
+        # Filter out any queries that look like template examples
+        raw_queries = parsed.get("queries", [])
+        template_indicators = {"q1", "q2", "query1", "query2", "search query", "specific search"}
+        clean_queries = [
+            q for q in raw_queries
+            if q.strip() and q.lower().strip() not in template_indicators
+            and len(q) > 5  # Reject very short placeholder text
+        ]
+        
         return ReasoningDecision(
             action=parsed.get("action", "stop"),
             target=parsed.get("target", ""),
-            queries=parsed.get("queries", []),
+            queries=clean_queries,
             confidence=float(parsed.get("confidence", 0.5)),
             reasoning=parsed.get("reasoning", ""),
         )
