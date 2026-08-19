@@ -184,6 +184,7 @@ async def semantic_retriever_block(
         return NodeResult(query_label, [], [], terminated_reason="global_deadline")
 
     # ----- Stage 1: Source resolution + chunking -----
+    chunks = []
     try:
         chunks = await asyncio.wait_for(
             resolve_sources(inp, kb_search_fn=kb_search_fn),
@@ -191,7 +192,31 @@ async def semantic_retriever_block(
         )
     except (asyncio.TimeoutError, Exception) as e:
         logger.warning("Node '%s' source resolution failed: %s", query_label[:50], e)
-        return NodeResult(query_label, [], [], terminated_reason="timeout_or_error")
+
+    # Retry once with simplified query if initial attempt failed/empty
+    if not chunks and inp.query:
+        simplified = " ".join(inp.query.split()[:8])  # First 8 words
+        if simplified != inp.query:
+            logger.info("Retrying '%s' with simplified query: '%s'", query_label[:30], simplified[:50])
+            try:
+                from .types import BlockInput
+                retry_inp = BlockInput(
+                    query=simplified,
+                    mode=inp.mode,
+                    depth=inp.depth,
+                    max_depth=inp.max_depth,
+                    node_timeout_s=inp.node_timeout_s,
+                    global_deadline=inp.global_deadline,
+                    fetch_fn=inp.fetch_fn,
+                )
+                chunks = await asyncio.wait_for(
+                    resolve_sources(retry_inp, kb_search_fn=kb_search_fn),
+                    timeout=inp.node_timeout_s,
+                )
+                if chunks:
+                    logger.info("Retry succeeded: %d chunks from simplified query", len(chunks))
+            except Exception as retry_e:
+                logger.warning("Retry also failed: %s", retry_e)
 
     if not chunks:
         return NodeResult(query_label, [], [], terminated_reason="no_results")

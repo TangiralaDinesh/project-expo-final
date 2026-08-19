@@ -236,8 +236,28 @@ async def fan_out_query(
 
     if isinstance(results[0], list):
         plan.semantic_variants = results[0]
+    else:
+        logger.warning("Semantic variant generation failed: %s", results[0])
     if isinstance(results[1], list):
         plan.angle_queries = results[1]
+    else:
+        logger.warning("Angle query generation failed: %s", results[1])
+
+    # Fallback: if BOTH LLM calls failed, generate simple rule-based variants
+    if not plan.semantic_variants and not plan.angle_queries:
+        logger.info("Fan-out fallback: generating rule-based variants for '%s'", query[:50])
+        words = query.split()
+        if len(words) > 3:
+            # Simple angle variants
+            plan.angle_queries = [
+                f"{query} detailed analysis",
+                f"{query} examples and data",
+            ]
+            # If it looks like a comparison, add per-entity queries
+            if any(w.lower() in ('vs', 'versus', 'compared', 'or') for w in words):
+                entities = [w for w in words if w[0].isupper() and len(w) > 2]
+                for entity in entities[:2]:
+                    plan.angle_queries.append(f"{entity} filmography box office results")
 
     # Include existing aspect queries from SubqueryGenerator
     if existing_aspect_queries:

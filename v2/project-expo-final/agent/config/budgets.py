@@ -82,7 +82,7 @@ AIOHTTP_DNS_CACHE_S = 300
 # ---------------------------------------------------------------------------
 # Retrieval satisfaction loop
 # ---------------------------------------------------------------------------
-MAX_SATISFACTION_ROUNDS = 2      # max re-retrieval rounds after initial retrieval
+MAX_SATISFACTION_ROUNDS = 2      # max reasoning rounds (LLM decides if round 2 is worth the cost)
 MIN_CONCEPT_SATISFACTION = 0.6   # per-concept satisfaction threshold for re-retrieval
 CRITIQUE_CONSENSUS_THRESHOLD = 0.5  # 2+ of 4 personas must agree gaps exist
 

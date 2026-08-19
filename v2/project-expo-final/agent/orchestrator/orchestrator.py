@@ -136,6 +136,7 @@ async def decompose_task(
     *,
     client: Optional[NIMClient] = None,
     satisfaction_tracker: Optional[SatisfactionTracker] = None,
+    intent_analysis=None,
 ) -> Decomposition:
     """
     DYNAMIC task decomposition using intent classification.
@@ -161,10 +162,9 @@ async def decompose_task(
             TaskNode("n1", SubagentType.CODE_GEN_EXECUTOR, task),
         ])
 
-    # ── STAGE 1: INTENT CLASSIFICATION (replaces rigid comparison detection) ──
-    # Analyze query intent and extract multiple focus areas dynamically
-    intent_analysis = None
-    if gate_mode == "SEMANTIC":
+    # ── STAGE 1: INTENT CLASSIFICATION ──
+    # Reuse intent_analysis from query.py if provided (avoids duplicate LLM/heuristic call)
+    if not intent_analysis and gate_mode == "SEMANTIC":
         try:
             classifier = IntentClassifier(client=client)
             intent_analysis = await classifier.analyze(
@@ -194,33 +194,61 @@ async def decompose_task(
             nodes = []
             entity_names = [fa.name for fa in focus_areas]
             
-            # Create one retriever node per entity (parallel, no dependencies)
-            for i, focus_area in enumerate(focus_areas[:5]):  # Limit to 5 entities
-                node_id = f"focus_area_{i}_{focus_area.name.replace(' ', '_')}"
-                
-                # Use satisfaction layer to adjust retrieval depth if available
-                depth_hint = focus_area.retrieval_depth
-                if satisfaction_tracker:
-                    satisfaction_level = satisfaction_tracker.get_concept_satisfaction(focus_area.name)
-                    if satisfaction_level < 0.5:
-                        depth_hint = "comprehensive"  # Need more retrieval
-                    elif satisfaction_level > 0.8:
-                        depth_hint = "summary"  # Already satisfied
-                
-                entity_task = (
-                    f"Retrieve {depth_hint} information about {focus_area.name}. "
-                    f"Context: {task}\n\n"
-                    f"Entity type: {focus_area.entity_type}\n"
-                    f"Relevance level: {focus_area.relationship_type}\n"
-                    f"Include key facts, properties, metrics, and comparability dimensions."
+            # ── LLM-POWERED entity research planning ──
+            # Instead of "search entity name", LLM generates SPECIFIC questions
+            try:
+                from .llm_reasoning import generate_entity_research_plans
+                research_plans = await generate_entity_research_plans(
+                    task, entity_names, client=client,
                 )
+            except Exception as e:
+                logger.warning("LLM research planning failed: %s, using fallback", e)
+                research_plans = []
+            
+            if research_plans:
+                # Create nodes from LLM-generated research plans
+                for i, plan in enumerate(research_plans):
+                    for j, search_query in enumerate(plan.search_queries[:3]):
+                        node_id = f"entity_{i}_{plan.entity.replace(' ', '_')}_q{j}"
+                        nodes.append(TaskNode(
+                            node_id=node_id,
+                            subagent_type=SubagentType.RETRIEVER,
+                            task=search_query,
+                            depends_on=[],
+                        ))
                 
-                nodes.append(TaskNode(
-                    node_id=node_id,
-                    subagent_type=SubagentType.RETRIEVER,
-                    task=entity_task,
-                    depends_on=[],  # Parallel execution
-                ))
+                logger.info(
+                    "LLM research plans: %s → %d search nodes",
+                    [(p.entity, p.search_queries[:2]) for p in research_plans],
+                    len(nodes),
+                )
+            else:
+                # Fallback: Create one retriever node per entity with generic task
+                for i, focus_area in enumerate(focus_areas[:5]):
+                    node_id = f"focus_area_{i}_{focus_area.name.replace(' ', '_')}"
+                    
+                    depth_hint = focus_area.retrieval_depth
+                    if satisfaction_tracker:
+                        satisfaction_level = satisfaction_tracker.get_concept_satisfaction(focus_area.name)
+                        if satisfaction_level < 0.5:
+                            depth_hint = "comprehensive"
+                        elif satisfaction_level > 0.8:
+                            depth_hint = "summary"
+                    
+                    entity_task = (
+                        f"Retrieve {depth_hint} information about {focus_area.name}. "
+                        f"Context: {task}\n\n"
+                        f"Entity type: {focus_area.entity_type}\n"
+                        f"Relevance level: {focus_area.relationship_type}\n"
+                        f"Include key facts, properties, metrics, and comparability dimensions."
+                    )
+                    
+                    nodes.append(TaskNode(
+                        node_id=node_id,
+                        subagent_type=SubagentType.RETRIEVER,
+                        task=entity_task,
+                        depends_on=[],
+                    ))
             
             # Add synthesis node that depends on all entity nodes
             entity_node_ids = [n.node_id for n in nodes]
@@ -515,17 +543,27 @@ async def run_orchestrator(
     client = client or get_client()
     coordinator = get_state_coordinator()  # Phase 5: Get state coordinator
 
-    # Query knowledge graph for related concepts (Tier 1 feature)
+    # Query knowledge graph + decompose IN PARALLEL (both are I/O-bound)
     features_enabled = getattr(thinking_profile, 'features_enabled', None) if thinking_profile else None
-    related_concepts = await query_knowledge_graph_for_context(task, features_enabled)
 
-    # ── DYNAMIC DECOMPOSITION with intent classification and satisfaction guidance ──
-    decomposition = await decompose_task(
+    kg_task = query_knowledge_graph_for_context(task, features_enabled)
+    decompose_coro = decompose_task(
         task, 
         gate_mode, 
         client=client,
-        satisfaction_tracker=satisfaction,  # Pass satisfaction for dynamic guidance
+        satisfaction_tracker=satisfaction,
+        intent_analysis=intent_analysis,  # Reuse from query.py — skip duplicate classification
     )
+    
+    related_concepts, decomposition = await asyncio.gather(
+        kg_task, decompose_coro, return_exceptions=True,
+    )
+    
+    if isinstance(related_concepts, Exception):
+        related_concepts = []
+    if isinstance(decomposition, Exception):
+        logger.error("Decomposition failed: %s", decomposition)
+        return {}
     if not decomposition.nodes:
         return {}
 
@@ -694,5 +732,42 @@ async def run_orchestrator(
         f"   Comparison query: {'Yes' if any('compare' in r for r in results) else 'No'}\n"
         f"   Orchestration time: {orch_elapsed:.2f}s"
     )
+
+    # ── Retry failed nodes with simplified queries ──
+    if failed_results > 0 and results:
+        success_rate = successful_results / len(results)
+        if success_rate < 0.6:  # More than 40% failed
+            failed_nodes = [
+                node for layer in layers for node in layer
+                if node.node_id in results and not results[node.node_id].success
+            ]
+            if failed_nodes:
+                logger.info(
+                    "🔄 Retrying %d failed nodes with simplified queries...",
+                    len(failed_nodes),
+                )
+                retry_coros = []
+                for node in failed_nodes[:3]:  # Cap retries at 3
+                    # Simplify task: take first 10 words
+                    simple_task = " ".join(node.task.split()[:10])
+                    retry_inp = SubagentInput(
+                        task=simple_task,
+                        subagent_type=node.subagent_type,
+                    )
+                    retry_coros.append(run_subagent(retry_inp))
+
+                try:
+                    retry_results = await asyncio.gather(
+                        *retry_coros, return_exceptions=True
+                    )
+                    for node, retry_result in zip(failed_nodes[:3], retry_results):
+                        if isinstance(retry_result, Exception):
+                            logger.warning("Retry failed for %s: %s", node.node_id, retry_result)
+                            continue
+                        if retry_result and retry_result.success:
+                            results[node.node_id] = retry_result
+                            logger.info("✅ Retry succeeded for %s", node.node_id)
+                except Exception as e:
+                    logger.warning("Retry batch failed: %s", e)
     
     return results

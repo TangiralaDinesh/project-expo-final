@@ -165,7 +165,7 @@ async def _brave_web_search(
     headers = {
         "Accept": "application/json",
         "Accept-Encoding": "gzip",
-        "X-Subscription-Token": settings.brave.api_key,
+        "X-Subscription-Token": settings.brave.next_key(),
     }
     params = {
         "q": query,
@@ -231,7 +231,7 @@ async def _brave_llm_context(
     headers = {
         "Accept": "application/json",
         "Accept-Encoding": "gzip",
-        "X-Subscription-Token": settings.brave.api_key,
+        "X-Subscription-Token": settings.brave.next_key(),
     }
     params = {"q": query}
 
@@ -286,7 +286,7 @@ async def _brave_image_search(
     headers = {
         "Accept": "application/json",
         "Accept-Encoding": "gzip",
-        "X-Subscription-Token": settings.brave.api_key,
+        "X-Subscription-Token": settings.brave.next_key(),
     }
     params = {
         "q": query,
@@ -337,11 +337,8 @@ async def _serpapi_fallback(
         session = aiohttp.ClientSession()
 
     try:
-        # Pick random key from list, fallback to single key
-        active_key = (
-            random.choice(settings.serpapi.api_keys)
-            if settings.serpapi.api_keys else settings.serpapi.api_key
-        )
+        # Round-robin key from pool
+        active_key = settings.serpapi.next_key()
         
         params = {
             "engine": settings.serpapi.engine,

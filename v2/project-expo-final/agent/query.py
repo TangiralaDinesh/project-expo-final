@@ -198,29 +198,36 @@ async def run_query(
 
     # ── Semantic cache check ──
     sem_cache = get_semantic_cache()
-    try:
-        query_vec = await embed_query(query, client=client)
-        cached = sem_cache.get(query_vec)
-        if cached:
-            return QueryResult(
-                answer=cached.get("answer", ""),
-                learnings=cached.get("learnings", []),
-                source_urls=cached.get("source_urls", []),
-                timing_ms=(time.time() - t0) * 1000,
-                from_cache=True,
-            )
-    except Exception:
-        query_vec = []
 
-    # ── Stage 1: Entry gate + Clarify (parallel) ──
+    # ── Stage 1: Entry gate + Clarify + Embed (ALL parallel — saves 2-5s) ──
     gate_task = entry_gate(query, client=client)
     clarify_task = generate_clarifying_question(
         query, client=client, memory_context=memory_context,
     )
+    embed_task = embed_query(query, client=client)
 
-    gate_result, clarify_result = await asyncio.gather(
-        gate_task, clarify_task, return_exceptions=True,
+    results = await asyncio.gather(
+        gate_task, clarify_task, embed_task, return_exceptions=True,
     )
+
+    gate_result = results[0]
+    clarify_result = results[1]
+    query_vec = results[2] if not isinstance(results[2], Exception) else []
+
+    # Check cache with embedding result
+    if query_vec:
+        try:
+            cached = sem_cache.get(query_vec)
+            if cached:
+                return QueryResult(
+                    answer=cached.get("answer", ""),
+                    learnings=cached.get("learnings", []),
+                    source_urls=cached.get("source_urls", []),
+                    timing_ms=(time.time() - t0) * 1000,
+                    from_cache=True,
+                )
+        except Exception:
+            pass
 
     if isinstance(gate_result, Exception):
         gate_result = GateDecision(needs_retrieval=True, mode="SEMANTIC", reason="gate_error")
@@ -357,26 +364,33 @@ async def run_query(
         elif 'explain' in intent_val.lower() or 'how' in effective_query.lower():
             geohash_tree.set_strategy("focused")
 
-    # ── Phase 2: Query Fan-Out (generate semantic variants) ──
-    async with trace.span("query_fanout") as fanout_span:
+    # ── Phase 2 + Orchestrator: Run fan-out IN PARALLEL with orchestrator ──
+    # Fan-out generates variant queries; orchestrator uses them IF they arrive in time.
+    # This eliminates the 5-10s fan-out blocking time.
+    
+    fan_out_plan = None
+    pipeline_deadline = time.time() + 75.0  # 75s total budget for retrieval
+
+    async def _do_fan_out():
+        """Generate fan-out queries (runs in parallel with orchestrator)."""
+        nonlocal fan_out_plan
         try:
             fan_out_plan = await fan_out_query(
                 effective_query, client=client,
-                existing_aspect_queries=None,  # SubqueryGenerator handles this internally
+                existing_aspect_queries=None,
             )
-            trace.add_attribute(fanout_span, "total_queries", len(fan_out_plan.selected_queries))
-            trace.add_attribute(fanout_span, "dedup_removed", len(fan_out_plan.dedup_removed))
-            logger.info(
-                "Fan-out: %d queries selected (removed %d dupes)",
-                len(fan_out_plan.selected_queries), len(fan_out_plan.dedup_removed),
-            )
+            if fan_out_plan:
+                trace.add_attribute(root_span, "fanout_queries", len(fan_out_plan.selected_queries))
+                logger.info(
+                    "Fan-out: %d queries selected (removed %d dupes)",
+                    len(fan_out_plan.selected_queries), len(fan_out_plan.dedup_removed),
+                )
         except Exception as e:
             logger.warning("Fan-out failed: %s, continuing with original query", e)
-            fan_out_plan = None
 
-    # Pass intent analysis to orchestrator for dynamic decomposition
-    async with trace.span("orchestrator_wave1") as orch_span:
-        orch_results = await run_orchestrator(
+    async def _do_orchestrator():
+        """Run orchestrator (main retrieval)."""
+        return await run_orchestrator(
             effective_query,
             run_subagent=run_subagent,
             gate_mode=gate_result.mode,
@@ -385,93 +399,190 @@ async def run_query(
             satisfaction=satisfaction,
             intent_analysis=intent_analysis,
         )
-        trace.add_attribute(orch_span, "subagents", len(orch_results))
+
+    # Fire BOTH in parallel — orchestrator doesn't need fan-out results
+    async with trace.span("parallel_fanout_orchestrator") as parallel_span:
+        fan_out_task = asyncio.create_task(_do_fan_out())
+        orch_results = await _do_orchestrator()
+        
+        # Wait for fan-out to finish (it usually finishes before orchestrator)
+        try:
+            await asyncio.wait_for(fan_out_task, timeout=2.0)
+        except (asyncio.TimeoutError, Exception):
+            pass  # Fan-out didn't finish in time, that's fine
+        
+        trace.add_attribute(parallel_span, "subagents", len(orch_results))
 
     # ── Collect all learnings ──
     all_learnings, all_urls = _collect_results(orch_results)
 
-    # ── Phase 1: Retrieval Satisfaction Loop with Critique Gate ──
-    # Uses EXISTING SatisfactionTracker + critique.py (were disconnected until now)
+    # ── LLM-POWERED REASONING LOOP ──
+    # The LLM is now IN the loop — it evaluates learnings, identifies gaps,
+    # generates targeted follow-up queries, and decides when to stop.
+    # This replaces the heuristic satisfaction checking.
+    from .core.llm_reasoning import evaluate_learnings, decide_next_action, explore_connected_dots
+    
     satisfaction_scores = {}
     unsatisfied_concepts = []
-    wave_2_learnings = []  # Initialized for resonance check at round > 0
+    wave_2_learnings = []
+    llm_quality_score = 0.0
 
     for retrieval_round in range(MAX_SATISFACTION_ROUNDS):
-        if not satisfaction:
+        # Time budget check
+        elapsed = time.time() - t0
+        if elapsed > 55.0:  # Hard budget: 55s for retrieval phases
+            logger.info("Reasoning loop: time budget exhausted (%.0fs), stopping", elapsed)
             break
 
         async with trace.span(
-            f"satisfaction_round_{retrieval_round + 1}",
+            f"reasoning_round_{retrieval_round + 1}",
             round=retrieval_round + 1,
-        ) as sat_span:
-            # Evaluate per-concept satisfaction
-            concepts = satisfaction.extract_concepts(effective_query)
-            satisfaction_scores = await satisfaction.evaluate_satisfaction(
-                effective_query, all_learnings, concepts
+        ) as reason_span:
+            # ── STEP 1: LLM evaluates current learnings ──
+            # This is the KEY difference — LLM reads the learnings and judges
+            # whether they actually answer the query (not just text overlap)
+            llm_eval_task = evaluate_learnings(
+                effective_query, all_learnings, client=client,
             )
-            unsatisfied_concepts = satisfaction.get_unsatisfied_concepts(
-                threshold=MIN_CONCEPT_SATISFACTION
-            )
-
-            trace.add_attribute(sat_span, "satisfaction", satisfaction_scores)
-            trace.add_attribute(sat_span, "unsatisfied", unsatisfied_concepts)
-
-            if not unsatisfied_concepts:
-                logger.info("Round %d: All concepts satisfied", retrieval_round + 1)
+            
+            # Run LLM evaluation + heuristic satisfaction IN PARALLEL
+            heuristic_task = None
+            if satisfaction:
+                concepts = satisfaction.extract_concepts(effective_query)
+                heuristic_task = satisfaction.evaluate_satisfaction(
+                    effective_query, all_learnings, concepts
+                )
+            
+            if heuristic_task:
+                llm_eval, heuristic_scores = await asyncio.gather(
+                    llm_eval_task, heuristic_task, return_exceptions=True,
+                )
+                if isinstance(heuristic_scores, dict):
+                    satisfaction_scores = heuristic_scores
+            else:
+                llm_eval = await llm_eval_task
+            
+            if isinstance(llm_eval, Exception):
+                logger.warning("LLM evaluation failed: %s", llm_eval)
                 break
-
-            # ── Phase 8: Check resonance before re-retrieving ──
-            if retrieval_round > 0:
+            
+            llm_quality_score = llm_eval.quality_score
+            trace.add_attribute(reason_span, "llm_quality", llm_eval.quality_score)
+            trace.add_attribute(reason_span, "llm_sufficient", llm_eval.sufficient)
+            trace.add_attribute(reason_span, "missing_aspects", llm_eval.missing_aspects)
+            
+            logger.info(
+                "Reasoning round %d: quality=%.2f, sufficient=%s, missing=%s",
+                retrieval_round + 1, llm_eval.quality_score, llm_eval.sufficient,
+                llm_eval.missing_aspects[:3],
+            )
+            
+            # If LLM says sufficient, stop
+            if llm_eval.sufficient and llm_eval.confidence > 0.6:
+                logger.info("LLM says sufficient (conf=%.2f), stopping", llm_eval.confidence)
+                break
+            
+            # ── STEP 2: Check resonance (are we getting new info?) ──
+            if retrieval_round > 0 and wave_2_learnings:
                 continue_retrieval, reason = should_continue_retrieval(
                     existing_learnings=all_learnings[:-len(wave_2_learnings)] if wave_2_learnings else all_learnings,
-                    new_learnings=wave_2_learnings if wave_2_learnings else [],
+                    new_learnings=wave_2_learnings,
                     satisfaction_scores=satisfaction_scores,
                     min_satisfaction=MIN_CONCEPT_SATISFACTION,
                 )
-                trace.add_attribute(sat_span, "resonance_decision", reason)
+                trace.add_attribute(reason_span, "resonance_decision", reason)
                 if not continue_retrieval:
                     logger.info("Resonance says stop: %s", reason)
                     break
-
-            # ── Run critique on retrieval (EXISTING but was disconnected) ──
-            critique_queries = []
-            try:
-                from .core.critique import run_critique_on_retrieval
-                # Convert Learning objects to strings for critique
-                learning_texts = [l.text if hasattr(l, 'text') else str(l) for l in all_learnings]
-                critique_result = await run_critique_on_retrieval(
-                    effective_query, learning_texts, client=client,
-                )
-                if critique_result and hasattr(critique_result, 'suggested_queries'):
-                    critique_queries = critique_result.suggested_queries or []
-                elif critique_result and isinstance(critique_result, dict):
-                    critique_queries = critique_result.get('suggested_queries', [])
-                trace.add_attribute(sat_span, "critique_queries", len(critique_queries))
-            except Exception as e:
-                logger.debug("Critique failed: %s, using concept-based gap queries", e)
-
-            # Build gap-filling queries from unsatisfied concepts + critique
-            gap_queries = critique_queries[:3] if critique_queries else []
-            for concept in unsatisfied_concepts[:3]:
-                if not any(concept.lower() in q.lower() for q in gap_queries):
-                    gap_queries.append(
-                        f"Detailed analysis of {concept} in context of: {effective_query}"
+            
+            # ── STEP 3: KG exploration + LLM decision IN PARALLEL ──
+            # Fire KG exploration and decision concurrently — decision uses
+            # whatever KG data arrives in time. Both are I/O-bound LLM calls.
+            
+            entities_for_kg = satisfaction.extract_concepts(effective_query) if satisfaction else []
+            
+            async def _kg_explore():
+                try:
+                    return await asyncio.wait_for(
+                        explore_connected_dots(
+                            effective_query, entities_for_kg, all_learnings, client=client,
+                        ),
+                        timeout=3.0,
                     )
-
+                except Exception:
+                    return []
+            
+            async def _decide(kg_ctx):
+                return await decide_next_action(
+                    effective_query, all_learnings,
+                    client=client,
+                    quality_score=llm_eval.quality_score,
+                    round_num=retrieval_round,
+                    elapsed_s=time.time() - t0,
+                    missing_aspects=llm_eval.missing_aspects,
+                    kg_context=kg_ctx,
+                )
+            
+            # Run both in parallel
+            kg_result, decision = await asyncio.gather(
+                _kg_explore(),
+                _decide([]),  # Decision starts immediately with empty KG context
+                return_exceptions=True,
+            )
+            
+            kg_context = kg_result if isinstance(kg_result, list) else []
+            if isinstance(decision, Exception):
+                logger.warning("Decision failed: %s", decision)
+                break
+            
+            trace.add_attribute(reason_span, "decision", decision.action)
+            trace.add_attribute(reason_span, "decision_reasoning", decision.reasoning)
+            
+            logger.info(
+                "LLM decision: %s (conf=%.2f) — %s",
+                decision.action, decision.confidence, decision.reasoning[:80],
+            )
+            
+            if decision.action == "stop":
+                break
+            
+            # ── STEP 4: Build follow-up queries from LLM eval + LLM decision + critique ──
+            gap_queries = []
+            
+            # Priority 1: LLM decision queries (most targeted)
+            gap_queries.extend(decision.queries[:3])
+            
+            # Priority 2: LLM evaluation follow-up queries
+            for q in llm_eval.follow_up_queries[:2]:
+                if not any(q.lower()[:20] in existing.lower() for existing in gap_queries):
+                    gap_queries.append(q)
+            
+            # Priority 3: KG connected-dot queries
+            for q in kg_context[:2]:
+                if not any(q.lower()[:20] in existing.lower() for existing in gap_queries):
+                    gap_queries.append(q)
+            
+            if not gap_queries:
+                # Fallback: use missing aspects as queries
+                for aspect in llm_eval.missing_aspects[:3]:
+                    gap_queries.append(f"{aspect} {effective_query}")
+            
             if not gap_queries:
                 break
-
+            
+            gap_queries = gap_queries[:4]  # Cap at 4 queries
+            
             logger.info(
-                "Satisfaction round %d: re-retrieving for %d gap queries: %s",
+                "Progressive retrieval round %d: %d gap queries: %s",
                 retrieval_round + 1, len(gap_queries), gap_queries[:3],
             )
-
-            # Execute Wave 2 retrieval
+            
+            # ── STEP 5: Execute re-retrieval with LLM-generated queries ──
             wave_2_learnings = []
             wave_2_urls = []
             try:
                 wave_2_results = await run_orchestrator(
-                    " | ".join(gap_queries[:3]),
+                    " | ".join(gap_queries),
                     run_subagent=run_subagent,
                     gate_mode=gate_result.mode,
                     client=client,
@@ -497,7 +608,7 @@ async def run_query(
         )
         trace.add_attribute(root_span, "geohash_path", geohash_tree.geohash_string)
 
-    # ── Stage 3: CRAG grading + synthesis ──
+    # ── Stage 3: CRAG grading + synthesis + gap scanning IN PARALLEL ──
     # Tier 2: Zoom filtering is OPT-IN (v1 behavior: use all learnings by default)
     # Only apply zoom filtering if explicitly requested via user params
     learnings_for_synthesis = all_learnings
@@ -521,17 +632,14 @@ async def run_query(
         zoom_metadata["description"] = "Deep analysis (top 15 learnings)"
     
     # ── Phase 2: Entropy-based learning selection (remove noise) ──
-    # Select high-signal learnings before synthesis
     if learnings_for_synthesis:
         from .core.reasoning import select_top_learnings
         
-        # Apply entropy filtering to keep top-8 by information gain
-        # (unless we have very few learnings, then use all)
         if len(learnings_for_synthesis) > 10:
             learnings_for_synthesis = select_top_learnings(
                 learnings_for_synthesis,
                 effective_query,
-                top_k=10,  # Keep top 10 for good coverage
+                top_k=10,
             )
             logger.debug(
                 "Entropy filtering applied: selected %d learnings from %d total",
@@ -542,6 +650,23 @@ async def run_query(
     # ── Phase 9: Assign citation IDs before synthesis ──
     for i, learning in enumerate(learnings_for_synthesis):
         learning.citation_id = f"[{i + 1}]"
+
+    # ── Run gap scanning IN PARALLEL with CRAG grading (both are I/O-bound LLM calls) ──
+    gap_scan_task = None
+    if _should_run_gap_scan(
+        learnings_count=len(all_learnings),
+        max_depth=profile.max_depth,
+        gate_mode=gate_result.mode,
+    ):
+        async def _do_gap_scan():
+            try:
+                return await scan_for_gaps(
+                    effective_query, all_learnings, client=client,
+                )
+            except Exception as e:
+                logger.debug("Gap scanning failed: %s", e)
+                return None
+        gap_scan_task = asyncio.create_task(_do_gap_scan())
 
     if learnings_for_synthesis:
         grade = await grade_retrieval(effective_query, learnings_for_synthesis, client=client)
@@ -595,25 +720,17 @@ async def run_query(
         if citation_lines:
             answer += "\n\n---\n**Sources:**\n" + "\n".join(citation_lines)
 
-    # ── Phase 5: Proactive Gap Scanning ──
-    if _should_run_gap_scan(
-        learnings_count=len(all_learnings),
-        max_depth=profile.max_depth,
-        gate_mode=gate_result.mode,
-    ):
+    # ── Collect gap scan result (ran in parallel with grading+synthesis) ──
+    if gap_scan_task:
         try:
-            async with trace.span("gap_scanning") as gap_span:
-                gap_result = await scan_for_gaps(
-                    effective_query, all_learnings, client=client,
-                )
-                trace.add_attribute(gap_span, "gaps_found", len(gap_result.gaps))
-                trace.add_attribute(gap_span, "should_present", gap_result.should_present)
-                if gap_result.should_present:
-                    gap_text = format_gaps_for_user(gap_result)
-                    if gap_text:
-                        answer += gap_text
-        except Exception as e:
-            logger.debug("Gap scanning failed: %s", e)
+            gap_result = await asyncio.wait_for(gap_scan_task, timeout=3.0)
+            if gap_result and gap_result.should_present:
+                gap_text = format_gaps_for_user(gap_result)
+                if gap_text:
+                    answer += gap_text
+                trace.add_attribute(root_span, "gaps_found", len(gap_result.gaps))
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.debug("Gap scan collection failed: %s", e)
 
     # ── End tracing ──
     trace.end_span(root_span, status="ok",

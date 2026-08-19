@@ -89,12 +89,23 @@ class NIMSettings:
 
 @dataclass
 class BraveSettings:
-    """Brave Search API config."""
+    """Brave Search API config. Supports multi-key round-robin."""
 
     api_key: str = field(default_factory=lambda: _env("BRAVE_API_KEY", ""))
+    api_keys: list[str] = field(default_factory=lambda: _env_list("BRAVE_API_KEY"))
     base_url: str = "https://api.search.brave.com/res/v1/web/search"
     timeout: float = 8.0
     max_results: int = 8
+    _key_index: int = field(default=0, repr=False)
+
+    def next_key(self) -> str:
+        """Round-robin key selection from api_keys pool."""
+        keys = self.api_keys or ([self.api_key] if self.api_key else [])
+        if not keys:
+            return ""
+        key = keys[self._key_index % len(keys)]
+        object.__setattr__(self, '_key_index', self._key_index + 1)
+        return key
 
 
 @dataclass
@@ -108,13 +119,23 @@ class SearchSettings:
 
 @dataclass
 class SerpAPISettings:
-    """SerpAPI fallback — Google search when Brave key absent."""
+    """SerpAPI fallback — Google search when Brave key absent. Multi-key round-robin."""
 
     api_key: str = field(default_factory=lambda: _env("SERPAPI_KEY", ""))
     api_keys: list[str] = field(default_factory=lambda: _env_list("SERPAPI_KEY"))
     base_url: str = "https://serpapi.com/search"
     engine: str = "google"
     timeout: float = 10.0
+    _key_index: int = field(default=0, repr=False)
+
+    def next_key(self) -> str:
+        """Round-robin key selection from api_keys pool."""
+        keys = self.api_keys or ([self.api_key] if self.api_key else [])
+        if not keys:
+            return ""
+        key = keys[self._key_index % len(keys)]
+        object.__setattr__(self, '_key_index', self._key_index + 1)
+        return key
 
 
 @dataclass

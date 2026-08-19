@@ -226,16 +226,18 @@ class NIMClient:
         response_format_json: bool = False,
     ) -> str:
         """Dedicated worker for non-thinking high-speed semantic tasks via Groq."""
-        # Pick random key from list, fallback to single key
-        active_key = (
-            random.choice(self._cfg.groq_api_keys)
-            if self._cfg.groq_api_keys else self._cfg.groq_api_key
-        )
-        if not active_key:
+        # Thread-safe round-robin for Groq keys
+        keys = self._cfg.groq_api_keys if self._cfg.groq_api_keys else ([self._cfg.groq_api_key] if self._cfg.groq_api_key else [])
+        if not keys:
             return await self.chat_fast(
                 messages, model=model, temperature=temperature,
                 max_tokens=max_tokens, response_format_json=response_format_json
             )
+        # Atomic counter increment (safe in asyncio single-thread, matches _next_key pattern)
+        async with self._key_lock:
+            idx = self._key_idx
+            self._key_idx += 1
+        active_key = keys[idx % len(keys)]
 
         model = model or self._cfg.groq_worker_model
         body: dict = {
