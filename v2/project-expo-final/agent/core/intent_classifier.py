@@ -130,26 +130,67 @@ class IntentClassifier:
         """
         Analyze query intent and extract focus areas.
         
-        Args:
-            query: User query
-            satisfaction_tracker: Optional satisfaction tracker for guidance
-            use_llm: If True, use LLM for complex analysis; else use heuristics
-        
-        Returns:
-            QueryIntentAnalysis with intent, focus areas, and decomposition strategy
+        Pipeline:
+        1. Fast heuristic pass (sync, <1ms)
+        2. LLM entity extraction (async, ~2s) — corrects typos, extracts clean names
+        3. If LLM returns entities, override heuristic focus areas
         """
         # Fast heuristic pass
         heuristic_result = self._analyze_heuristic(query)
         
-        # If low confidence or complex query, use LLM for verification
-        if use_llm and heuristic_result.confidence < 0.7:
+        if not use_llm:
+            return heuristic_result
+        
+        # Run LLM entity extraction + optional LLM intent analysis IN PARALLEL
+        tasks = [self._llm_entity_extract(query)]
+        if heuristic_result.confidence < 0.7:
+            tasks.append(self._analyze_llm(query, satisfaction_tracker))
+        
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("LLM intent/entity extraction timed out, using heuristic")
+            return heuristic_result
+        
+        # Process LLM entity extraction result
+        llm_entities = results[0] if isinstance(results[0], list) else []
+        
+        if llm_entities:
+            # LLM returned corrected entities — rebuild focus areas
+            logger.info("Using LLM-corrected entities: %s (heuristic had: %s)",
+                       llm_entities, [fa.name for fa in heuristic_result.focus_areas])
+            
+            new_focus_areas = []
+            for i, entity in enumerate(llm_entities):
+                if i == 0:
+                    rel_type = "primary"
+                elif len(llm_entities) >= 2 and heuristic_result.intent == QueryIntent.COMPARISON:
+                    rel_type = "comparison"
+                else:
+                    rel_type = "secondary"
+                
+                new_focus_areas.append(FocusArea(
+                    name=entity,
+                    entity_type=self._infer_entity_type(entity),
+                    relevance=max(0, 1.0 - (i * 0.15)),
+                    relationship_type=rel_type,
+                    retrieval_depth="comprehensive" if rel_type == "primary" else "detailed",
+                    keywords=[entity.lower()],
+                ))
+            
+            heuristic_result.focus_areas = new_focus_areas
+            # Boost confidence since LLM confirmed the entities
+            heuristic_result.confidence = max(heuristic_result.confidence, 0.75)
+        
+        # Process LLM intent analysis result (if it ran)
+        if len(results) > 1 and not isinstance(results[1], Exception):
             try:
-                llm_result = await self._analyze_llm(query, satisfaction_tracker)
-                # Blend heuristic and LLM results
-                return self._blend_results(heuristic_result, llm_result, query)
+                return self._blend_results(heuristic_result, results[1], query)
             except Exception as e:
-                logger.debug(f"LLM intent analysis failed: {e}, using heuristic")
-                return heuristic_result
+                logger.debug("LLM intent blend failed: %s", e)
         
         return heuristic_result
     
@@ -240,46 +281,19 @@ class IntentClassifier:
         return analysis
     
     def _extract_focus_areas(self, query: str, intent: QueryIntent) -> list[FocusArea]:
-        """Extract multiple focus areas (entities/concepts) from query."""
+        """Extract multiple focus areas (entities/concepts) from query.
+        
+        Uses heuristic extraction first (fast, sync), then the async
+        LLM-based extraction corrects/enhances results (handles typos, 
+        disambiguates entities). The LLM path is called separately in
+        analyze() when confidence is low.
+        """
         focus_areas = []
         
-        # Extract proper nouns (likely entities)
-        # Simple heuristic: capitalized words
-        words = query.split()
-        proper_nouns = [w.rstrip("'\".,;:!?") for w in words if w[0].isupper() and len(w) > 1]
+        # ── Heuristic extraction (fast, sync) ──
+        entities = self._heuristic_entity_extract(query, intent)
         
-        # Remove common words
-        common = {"The", "A", "An", "I", "We", "You", "They"}
-        proper_nouns = [n for n in proper_nouns if n not in common]
-        
-        # Extract concepts from query patterns
-        # "X and Y" patterns
-        and_pattern = r"(\w+(?:\s+\w+)?)\s+and\s+(\w+(?:\s+\w+)?)"
-        and_matches = re.findall(and_pattern, query, re.IGNORECASE)
-        
-        # "X vs Y" patterns
-        vs_pattern = r"(\w+(?:\s+\w+)?)\s+(?:vs\.?|versus)\s+(\w+(?:\s+\w+)?)"
-        vs_matches = re.findall(vs_pattern, query, re.IGNORECASE)
-        
-        # Collect unique entities
-        entities = set()
-        
-        # From proper nouns
-        for noun in proper_nouns[:3]:  # Limit to top 3
-            entities.add(noun)
-        
-        # From patterns
-        for match in and_matches[:2]:
-            entities.add(match[0].strip())
-            entities.add(match[1].strip())
-        
-        for match in vs_matches[:2]:
-            entities.add(match[0].strip())
-            entities.add(match[1].strip())
-        
-        # Determine focus area properties
         if not entities:
-            # No specific entities, treat whole query as single focus
             focus_areas.append(FocusArea(
                 name="query_topic",
                 entity_type="concept",
@@ -289,16 +303,13 @@ class IntentClassifier:
                 keywords=[]
             ))
         else:
-            # Rank entities by relevance (position in query, mention count)
             entity_list = list(entities)
             for i, entity in enumerate(entity_list):
-                # Earlier entities and more frequent ones are more relevant
                 frequency = query.lower().count(entity.lower())
                 position_relevance = max(0, 1.0 - (i * 0.2))
                 frequency_relevance = min(frequency / 3.0, 1.0)
                 relevance = (position_relevance + frequency_relevance) / 2.0
                 
-                # Determine relationship type
                 if i == 0:
                     relationship_type = "primary"
                 elif len(entity_list) == 2 and intent == QueryIntent.COMPARISON:
@@ -306,7 +317,6 @@ class IntentClassifier:
                 else:
                     relationship_type = "secondary"
                 
-                # Determine retrieval depth based on position
                 if relationship_type == "primary":
                     retrieval_depth = "comprehensive"
                 elif relationship_type == "comparison":
@@ -327,6 +337,96 @@ class IntentClassifier:
         focus_areas.sort(key=lambda x: x.relevance, reverse=True)
         return focus_areas
     
+    def _heuristic_entity_extract(self, query: str, intent: QueryIntent) -> set[str]:
+        """Fast sync heuristic: regex + stop-word cleaning for entity extraction."""
+        words = query.split()
+        proper_nouns = [w.rstrip("'\".,;:!?") for w in words if len(w) > 1 and w[0].isupper()]
+        common = {"The", "A", "An", "I", "We", "You", "They", "Is", "Are", "Was", "Do", "Does"}
+        proper_nouns = [n for n in proper_nouns if n not in common]
+        
+        # VS pattern
+        vs_pattern = r"(.+?)\s+(?:vs\.?|versus)\s+(.+?)(?:\s+(?:who|what|which|how|more|less|had|have|has)\b.*)?$"
+        vs_match = re.match(vs_pattern, query, re.IGNORECASE)
+        
+        stop_words = {
+            "who", "what", "which", "where", "when", "how", "why",
+            "have", "has", "had", "more", "less", "most", "least",
+            "the", "a", "an", "is", "are", "was", "were", "do", "does",
+            "better", "worse", "bigger", "smaller", "than",
+            "many", "much", "few", "some", "all", "any", "block",
+            "busters", "blockbusters", "movies", "films",
+        }
+        
+        def _clean(raw: str) -> str:
+            parts = raw.strip().split()
+            while parts and parts[-1].lower() in stop_words:
+                parts.pop()
+            while parts and parts[0].lower() in stop_words:
+                parts.pop(0)
+            return " ".join(parts).strip()
+        
+        entities = set()
+        
+        if vs_match:
+            left = _clean(vs_match.group(1))
+            right = _clean(vs_match.group(2))
+            if left and len(left) > 1:
+                entities.add(left)
+            if right and len(right) > 1:
+                entities.add(right)
+        
+        # Proper nouns as fallback
+        for noun in proper_nouns[:3]:
+            cleaned = _clean(noun)
+            if cleaned and len(cleaned) > 1 and cleaned not in entities:
+                entities.add(cleaned)
+        
+        return entities
+    
+    async def _llm_entity_extract(self, query: str) -> list[str]:
+        """LLM-based entity extraction with typo correction.
+        
+        Uses chat_worker (fast path) to:
+        1. Correct typos ("zndaya" → "Zendaya")
+        2. Extract clean entity names
+        3. Identify comparison metric
+        
+        Returns list of corrected entity names, or empty list on failure.
+        """
+        prompt = (
+            f'Extract the key entity names from this query. Fix any typos in the names.\n'
+            f'Query: "{query}"\n\n'
+            f'Example: "tom hollandd vs zndaya who had more blokbusters"\n'
+            f'Answer: ["Tom Holland", "Zendaya"]\n\n'
+            f'Return ONLY a JSON array of corrected entity names (max 4 entities):'
+        )
+        
+        try:
+            raw = await self.client.chat_worker(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=80,
+            )
+            
+            import json
+            text = raw.strip()
+            # Extract JSON array
+            match = re.search(r'\[.*?\]', text, re.DOTALL)
+            if match:
+                entities = json.loads(match.group())
+                if isinstance(entities, list):
+                    # Validate — reject if template placeholders were echoed
+                    clean = [str(e).strip() for e in entities if str(e).strip() and len(str(e)) > 1]
+                    template_words = {"entity", "name", "entity1", "entity2", "example"}
+                    clean = [e for e in clean if e.lower() not in template_words]
+                    if clean:
+                        logger.info("LLM entity extraction: %s", clean)
+                        return clean[:4]
+        except Exception as e:
+            logger.debug("LLM entity extraction failed: %s", e)
+        
+        return []
+
     def _infer_entity_type(self, entity: str) -> str:
         """Infer what type of entity this is (person, place, tool, concept, etc.)."""
         entity_lower = entity.lower()

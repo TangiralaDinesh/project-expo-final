@@ -67,18 +67,14 @@ async def generate_semantic_variants(
     """
     client = client or get_client()
 
-    prompt = f"""Generate {num_variants} alternative search queries that would find the SAME information as the original query but using different words, synonyms, or phrasings.
+    prompt = f"""Generate {num_variants} alternative search queries that would find the SAME information as the original query but using different words.
 
 Original query: "{query}"
 
-Rules:
-1. Each variant should use DIFFERENT terminology but seek the SAME answer
-2. Include technical synonyms, alternative names, related jargon
-3. Don't just add/remove words — genuinely rephrase
-4. Keep each variant concise (under 15 words)
+Example: If query is "best laptop for programming 2024"
+Answer: ["top developer laptops 2024 coding", "programmer notebook recommendations", "software development laptop reviews"]
 
-Return ONLY a JSON array of strings, no explanation:
-["variant 1", "variant 2", "variant 3"]"""
+Now generate for MY query. Return ONLY a JSON array of strings:"""
 
     try:
         response = await client.chat_worker(
@@ -88,11 +84,14 @@ Return ONLY a JSON array of strings, no explanation:
         )
 
         import json
-        # Extract JSON array
         match = re.search(r'\[.*?\]', response, re.DOTALL)
         if match:
             variants = json.loads(match.group())
-            return [str(v).strip() for v in variants if v and str(v).strip()][:num_variants]
+            # Filter out template placeholders
+            clean = [str(v).strip() for v in variants if v and str(v).strip() and len(str(v)) > 5]
+            template_words = {"variant 1", "variant 2", "variant 3", "query 1", "query 2"}
+            clean = [v for v in clean if v.lower() not in template_words]
+            return clean[:num_variants]
     except Exception as e:
         logger.warning("Semantic variant generation failed: %s", e)
 
@@ -118,17 +117,10 @@ async def generate_angle_queries(
 
 Query: "{query}"
 
-Angles to consider:
-- Pros/advantages
-- Cons/risks/limitations
-- Alternatives/competitors
-- Real-world examples/case studies
-- Expert opinions/reviews
-- Technical deep-dive
-- Historical context
+Example: If query is "Should I use React for my project?"
+Answer: ["React framework advantages benefits 2024", "React limitations performance issues", "React vs Vue vs Angular comparison"]
 
-Return ONLY a JSON array of strings:
-["angle query 1", "angle query 2", "angle query 3"]"""
+Now generate for MY query. Return ONLY a JSON array of strings:"""
 
     try:
         response = await client.chat_worker(
@@ -141,7 +133,11 @@ Return ONLY a JSON array of strings:
         match = re.search(r'\[.*?\]', response, re.DOTALL)
         if match:
             angles = json.loads(match.group())
-            return [str(a).strip() for a in angles if a and str(a).strip()][:num_angles]
+            # Filter out template placeholders
+            clean = [str(a).strip() for a in angles if a and str(a).strip() and len(str(a)) > 5]
+            template_words = {"angle query 1", "angle query 2", "angle query 3", "query 1", "query 2"}
+            clean = [a for a in clean if a.lower() not in template_words]
+            return clean[:num_angles]
     except Exception as e:
         logger.warning("Angle query generation failed: %s", e)
 

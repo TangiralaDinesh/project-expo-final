@@ -187,9 +187,9 @@ class Settings:
     kb_dir: str = field(default_factory=lambda: _env(
         "AGENT_KB_DIR", os.path.join(os.path.expanduser("~"), ".agent_kb")))
     
-    # Feature flags for tier-based rollout (Tier 1-4)
-    # Default: Enable Tier 1 (connectivity + knowledge graph) for enhanced reasoning
-    features: FeatureFlags = field(default_factory=FeatureFlags.tier_1_only)
+    # Feature flags — default to production (proven features enabled)
+    # Previously tier_1_only which disabled fan-out, resonance, citations, gap scanning
+    features: FeatureFlags = field(default_factory=FeatureFlags.production)
     
     def enable_tier_1(self):
         """Enable Tier 1: Connectivity foundation"""

@@ -416,6 +416,33 @@ async def run_query(
     # ── Collect all learnings ──
     all_learnings, all_urls = _collect_results(orch_results)
 
+    # ── Ingest learnings into Knowledge Graph (fire-and-forget) ──
+    # KG starts empty each session — this populates it with entity-relation
+    # triples extracted from retrieved data, enabling cross-entity insights
+    # in subsequent reasoning rounds (connecting dots).
+    async def _ingest_learnings_to_kg():
+        try:
+            from .knowledge.graph_store import get_graph_store, extract_entities
+            graph = get_graph_store()
+            # Batch learnings text for extraction (cap at 10 to limit LLM calls)
+            texts_to_extract = []
+            for l in all_learnings[:10]:
+                text = getattr(l, 'text', str(l))
+                if len(text) > 50:  # Skip very short learnings
+                    texts_to_extract.append(text)
+            
+            if texts_to_extract:
+                combined_text = "\n---\n".join(texts_to_extract[:10])
+                triples = await extract_entities(combined_text, client=client)
+                if triples:
+                    graph.add_triples(triples)
+                    logger.info("KG ingestion: +%d triples from %d learnings (graph now has %d entities)",
+                               len(triples), len(texts_to_extract), graph.entity_count)
+        except Exception as e:
+            logger.debug("KG ingestion failed (non-critical): %s", e)
+    
+    kg_ingest_task = asyncio.create_task(_ingest_learnings_to_kg())
+
     # ── LLM-POWERED REASONING LOOP ──
     # The LLM is now IN the loop — it evaluates learnings, identifies gaps,
     # generates targeted follow-up queries, and decides when to stop.
@@ -434,6 +461,13 @@ async def run_query(
         if reasoning_elapsed > 30.0:
             logger.info("Reasoning loop: time budget exhausted (%.0fs in reasoning), stopping", reasoning_elapsed)
             break
+        
+        # Ensure KG ingest completes before first round (so explore can find triples)
+        if retrieval_round == 0 and kg_ingest_task:
+            try:
+                await asyncio.wait_for(kg_ingest_task, timeout=5.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
 
         async with trace.span(
             f"reasoning_round_{retrieval_round + 1}",
@@ -496,44 +530,36 @@ async def run_query(
                     logger.info("Resonance says stop: %s", reason)
                     break
             
-            # ── STEP 3: KG exploration + LLM decision IN PARALLEL ──
-            # Fire KG exploration and decision concurrently — decision uses
-            # whatever KG data arrives in time. Both are I/O-bound LLM calls.
+            # ── STEP 3: KG exploration + LLM decision ──
+            # KG explore runs first (fast, <100ms since graph is in-memory),
+            # then its context feeds into the LLM decision call.
             
             entities_for_kg = satisfaction.extract_concepts(effective_query) if satisfaction else []
             
-            async def _kg_explore():
-                try:
-                    return await asyncio.wait_for(
-                        explore_connected_dots(
-                            effective_query, entities_for_kg, all_learnings, client=client,
-                        ),
-                        timeout=3.0,
-                    )
-                except Exception:
-                    return []
+            kg_context = []
+            try:
+                kg_context = await asyncio.wait_for(
+                    explore_connected_dots(
+                        effective_query, entities_for_kg, all_learnings, client=client,
+                    ),
+                    timeout=3.0,
+                )
+            except Exception:
+                pass
             
-            async def _decide(kg_ctx):
-                return await decide_next_action(
+            # Decision gets KG context (not empty list anymore!)
+            try:
+                decision = await decide_next_action(
                     effective_query, all_learnings,
                     client=client,
                     quality_score=llm_eval.quality_score,
                     round_num=retrieval_round,
                     elapsed_s=time.time() - t0,
                     missing_aspects=llm_eval.missing_aspects,
-                    kg_context=kg_ctx,
+                    kg_context=kg_context,
                 )
-            
-            # Run both in parallel
-            kg_result, decision = await asyncio.gather(
-                _kg_explore(),
-                _decide([]),  # Decision starts immediately with empty KG context
-                return_exceptions=True,
-            )
-            
-            kg_context = kg_result if isinstance(kg_result, list) else []
-            if isinstance(decision, Exception):
-                logger.warning("Decision failed: %s", decision)
+            except Exception as e:
+                logger.warning("Decision failed: %s", e)
                 break
             
             trace.add_attribute(reason_span, "decision", decision.action)
