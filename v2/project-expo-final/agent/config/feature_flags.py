@@ -121,4 +121,5 @@ class FeatureFlags:
             resonance_enabled=True,
             citations_enabled=True,
             query_fanout_enabled=True,
+            external_kg_enabled=True,
         )

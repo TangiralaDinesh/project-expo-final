@@ -382,12 +382,15 @@ async def decide_next_action(
         
         parsed = _parse_json(response)
         if not parsed:
+            # Heuristic: stop if quality is decent OR if we have no learnings at all
+            # (0 learnings = search stack is dead, retrying won't help)
+            should_stop = quality_score > 0.6 or len(learnings) == 0
             return ReasoningDecision(
-                action="stop" if quality_score > 0.6 else "continue",
+                action="stop" if should_stop else "continue",
                 target="",
-                queries=[query + " detailed facts data"] if quality_score <= 0.6 else [],
+                queries=[query + " detailed facts data"] if not should_stop else [],
                 confidence=0.4,
-                reasoning="JSON parse failed, using heuristic",
+                reasoning="JSON parse failed, using heuristic" + (" (no learnings)" if len(learnings) == 0 else ""),
             )
         
         # Filter out any queries that look like template examples
@@ -409,12 +412,13 @@ async def decide_next_action(
         
     except Exception as e:
         logger.warning("LLM decision failed: %s", e)
+        should_stop = quality_score > 0.6 or len(learnings) == 0
         return ReasoningDecision(
-            action="stop" if quality_score > 0.6 else "continue",
+            action="stop" if should_stop else "continue",
             target="",
             queries=[],
             confidence=0.3,
-            reasoning=f"LLM decision failed: {e}",
+            reasoning=f"LLM decision failed: {e}" + (" (no learnings)" if len(learnings) == 0 else ""),
         )
 
 
@@ -434,15 +438,21 @@ async def explore_connected_dots(
     """
     client = client or get_client()
     
-    # Try to get KG connections
+    # Try to get KG connections from the actual graph store
     kg_connections = []
     try:
-        from ..knowledge.graph_rag import GraphRAG
-        graph = GraphRAG()
-        for entity in entities[:3]:
-            neighbors = graph.find_similar_concepts(entity.lower(), top_k=3)
-            kg_connections.extend(neighbors)
-        kg_connections = list(set(kg_connections))[:8]
+        from ..knowledge.graph_store import get_graph_store
+        graph = get_graph_store()
+        if graph.entity_count > 0:
+            for entity in entities[:3]:
+                triples = graph.query_entity(entity.lower(), hops=2)
+                for t in triples:
+                    # Collect connected entity names (not the query entity itself)
+                    if t.object.lower() != entity.lower():
+                        kg_connections.append(t.object)
+                    if t.subject.lower() != entity.lower():
+                        kg_connections.append(t.subject)
+            kg_connections = list(set(kg_connections))[:8]
     except Exception:
         pass  # KG not available, that's fine
     

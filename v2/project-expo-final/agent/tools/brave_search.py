@@ -31,6 +31,50 @@ from ..config.budgets import MAX_SEARCH_RESULTS
 logger = logging.getLogger(__name__)
 
 
+# ── Circuit Breaker (prevents repeated calls to dead/rate-limited APIs) ──
+# Tracks consecutive failures per provider. After max_failures, trips for cooldown_seconds.
+
+import time as _time
+
+class _CircuitBreaker:
+    """Simple circuit breaker for search providers."""
+    def __init__(self, max_failures: int = 2, cooldown_seconds: float = 60.0):
+        self._max_failures = max_failures
+        self._cooldown = cooldown_seconds
+        self._failures: dict[str, int] = {}       # provider → consecutive failure count
+        self._tripped_at: dict[str, float] = {}    # provider → timestamp when tripped
+
+    def is_open(self, provider: str) -> bool:
+        """Check if circuit is open (tripped). If cooldown expired, reset."""
+        if provider not in self._tripped_at:
+            return False
+        elapsed = _time.time() - self._tripped_at[provider]
+        if elapsed > self._cooldown:
+            # Cooldown expired, reset
+            self._failures.pop(provider, None)
+            self._tripped_at.pop(provider, None)
+            logger.info("Circuit breaker reset for '%s' (cooldown expired)", provider)
+            return False
+        return True
+
+    def record_failure(self, provider: str):
+        """Record a failure. Trips circuit after max_failures consecutive."""
+        self._failures[provider] = self._failures.get(provider, 0) + 1
+        if self._failures[provider] >= self._max_failures:
+            self._tripped_at[provider] = _time.time()
+            logger.warning(
+                "Circuit breaker TRIPPED for '%s' (%d consecutive failures, cooldown %ds)",
+                provider, self._failures[provider], self._cooldown,
+            )
+
+    def record_success(self, provider: str):
+        """Reset failure count on success."""
+        self._failures.pop(provider, None)
+        self._tripped_at.pop(provider, None)
+
+_circuit = _CircuitBreaker(max_failures=2, cooldown_seconds=60.0)
+
+
 @dataclass
 class SearchResult:
     """One search result with URL, title, snippet, and optional extras."""
@@ -88,7 +132,7 @@ async def brave_search(
         tasks = []
 
         # ── Branch 1: Brave ──
-        if settings.brave.api_key:
+        if settings.brave.api_key and not _circuit.is_open("brave"):
             async def _do_brave():
                 b_tasks = [
                     _brave_web_search(query, max_results, session),
@@ -104,7 +148,7 @@ async def brave_search(
             tasks.append(_do_brave())
 
         # ── Branch 2: SerpAPI ──
-        if settings.serpapi.api_key:
+        if settings.serpapi.api_key and not _circuit.is_open("serpapi"):
             async def _do_serp():
                 web = await _serpapi_fallback(query, max_results, session)
                 return BraveResults(web_results=web or [])
@@ -356,6 +400,7 @@ async def _serpapi_fallback(
         ) as resp:
             if resp.status != 200:
                 logger.warning("SerpAPI returned %d", resp.status)
+                _circuit.record_failure("serpapi")
                 return []
 
             data = await resp.json()
@@ -396,50 +441,125 @@ async def _serpapi_fallback(
                     snippet_sufficient=True,
                 ))
 
+            _circuit.record_success("serpapi")
             return results
 
     except Exception as e:
         logger.warning("SerpAPI search failed: %s", e)
+        _circuit.record_failure("serpapi")
         return []
     finally:
         if own_session and session:
             await session.close()
 
 
-# ── DuckDuckGo Fallback ──
+# ── DuckDuckGo Fallback (multi-layer) ──
 
 async def _ddg_fallback(
     query: str,
     max_results: int,
     session: Optional[aiohttp.ClientSession],
 ) -> list[SearchResult]:
-    """DuckDuckGo lite — same approach as jarvis/searchTools.ts."""
+    """DuckDuckGo fallback with 3 layers of resilience.
+    
+    Layer 1: duckduckgo_search pip package (most reliable, if installed)
+    Layer 2: DDG Instant Answer API (JSON, no HTML scraping)
+    Layer 3: DDG lite HTML scraping (original, updated regex)
+    """
+    # Layer 1: Try duckduckgo_search package (async wrapper)
+    try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append(SearchResult(
+                    url=r.get("href", ""),
+                    title=r.get("title", ""),
+                    snippet=r.get("body", "")[:200],
+                ))
+        if results:
+            logger.info("DDG (package): %d results for '%s'", len(results), query[:40])
+            return results
+    except ImportError:
+        pass  # Package not installed, try next layer
+    except Exception as e:
+        logger.debug("DDG package failed: %s, trying API fallback", e)
+
+    # Layer 2: DDG Instant Answer API (JSON, no scraping)
     own_session = session is None
     if own_session:
         session = aiohttp.ClientSession()
 
     try:
+        api_url = "https://api.duckduckgo.com/"
+        params = {"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"}
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; AgentBot/1.0)"}
+
+        async with session.get(
+            api_url, params=params, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=settings.search.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json(content_type=None)
+                results = []
+                
+                # Abstract result (if available)
+                if data.get("AbstractText") and data.get("AbstractURL"):
+                    results.append(SearchResult(
+                        url=data["AbstractURL"],
+                        title=data.get("Heading", query),
+                        snippet=data["AbstractText"][:200],
+                    ))
+                
+                # Related topics
+                for topic in data.get("RelatedTopics", [])[:max_results]:
+                    if isinstance(topic, dict) and topic.get("FirstURL"):
+                        results.append(SearchResult(
+                            url=topic["FirstURL"],
+                            title=topic.get("Text", "")[:80],
+                            snippet=topic.get("Text", "")[:200],
+                        ))
+                
+                if results:
+                    logger.info("DDG (API): %d results for '%s'", len(results), query[:40])
+                    return results[:max_results]
+    except Exception as e:
+        logger.debug("DDG API failed: %s, trying HTML fallback", e)
+
+    # Layer 3: DDG lite HTML scraping (original approach, updated regex)
+    try:
         url = f"{settings.search.ddg_url}?q={aiohttp.helpers.quote(query, safe='')}&kl=us-en"
         headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; AgentBot/1.0)",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html",
         }
 
         async with session.get(
-            url,
-            headers=headers,
+            url, headers=headers,
             timeout=aiohttp.ClientTimeout(total=settings.search.timeout),
         ) as resp:
             if resp.status != 200:
                 return []
 
             html = await resp.text()
+            # Try multiple regex patterns (DDG changes HTML structure)
             link_matches = re.findall(
                 r'<a[^>]+href="([^"]*)"[^>]*>([^<]+)</a>', html, re.IGNORECASE
             )
+            if not link_matches:
+                # Alternative pattern for newer DDG lite markup
+                link_matches = re.findall(
+                    r'href="(https?://[^"]+)"[^>]*>([^<]+)', html, re.IGNORECASE
+                )
+            
             snippet_matches = re.findall(
                 r'<td class="result-snippet"[^>]*>([\s\S]*?)</td>', html, re.IGNORECASE
             )
+            if not snippet_matches:
+                # Alternative snippet pattern
+                snippet_matches = re.findall(
+                    r'class="[^"]*snippet[^"]*"[^>]*>([\s\S]*?)</(?:td|div|span)>', html, re.IGNORECASE
+                )
 
             results = []
             snippet_idx = 0
@@ -458,11 +578,15 @@ async def _ddg_fallback(
                 results.append(SearchResult(
                     url=href, title=clean_title, snippet=snippet,
                 ))
+            
+            if results:
+                logger.info("DDG (HTML): %d results for '%s'", len(results), query[:40])
             return results
 
     except Exception as e:
-        logger.warning("DDG search failed: %s", e)
+        logger.warning("DDG search failed (all layers): %s", e)
         return []
     finally:
         if own_session and session:
             await session.close()
+

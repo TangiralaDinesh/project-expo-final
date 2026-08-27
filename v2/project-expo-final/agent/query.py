@@ -443,6 +443,41 @@ async def run_query(
     
     kg_ingest_task = asyncio.create_task(_ingest_learnings_to_kg())
 
+    # ── USE Fan-Out Queries (previously generated but discarded) ──
+    # If initial retrieval was thin, use fan-out queries for supplementary retrieval.
+    # Even if initial is good, keep fan-out queries as seeds for gap-filling.
+    fan_out_seed_queries = []
+    if fan_out_plan and fan_out_plan.selected_queries:
+        # Skip the original query (index 0) — orchestrator already used it
+        fan_out_seed_queries = [
+            q for q in fan_out_plan.selected_queries
+            if q.lower().strip() != effective_query.lower().strip()
+        ]
+
+        # If initial retrieval is thin, run fan-out queries as supplementary retrieval
+        if len(all_learnings) < 8 and fan_out_seed_queries:
+            logger.info(
+                "Initial retrieval thin (%d learnings) — running %d fan-out queries as supplement",
+                len(all_learnings), len(fan_out_seed_queries[:3]),
+            )
+            try:
+                fanout_results = await run_orchestrator(
+                    " | ".join(fan_out_seed_queries[:3]),
+                    run_subagent=run_subagent,
+                    gate_mode=gate_result.mode,
+                    client=client,
+                    thinking_profile=profile,
+                )
+                fanout_learnings, fanout_urls = _collect_results(fanout_results)
+                all_learnings.extend(fanout_learnings)
+                all_urls.extend(fanout_urls)
+                logger.info(
+                    "Fan-out supplement: +%d learnings, +%d URLs",
+                    len(fanout_learnings), len(fanout_urls),
+                )
+            except Exception as e:
+                logger.warning("Fan-out supplementary retrieval failed: %s", e)
+
     # ── LLM-POWERED REASONING LOOP ──
     # The LLM is now IN the loop — it evaluates learnings, identifies gaps,
     # generates targeted follow-up queries, and decides when to stop.
@@ -593,6 +628,10 @@ async def run_query(
                 # Fallback: use missing aspects as queries
                 for aspect in llm_eval.missing_aspects[:3]:
                     gap_queries.append(f"{aspect} {effective_query}")
+            
+            if not gap_queries and fan_out_seed_queries:
+                # Priority 4: Unused fan-out seed queries (consume one per round)
+                gap_queries.append(fan_out_seed_queries.pop(0))
             
             if not gap_queries:
                 break

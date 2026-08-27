@@ -187,29 +187,30 @@ def _dynamic_intent_classifier(query: str) -> Optional[str]:
     Uses multi-layer pattern matching with priority ordering to classify queries accurately.
     Returns: "PARAMETRIC" | "SEMANTIC" | "CODE" | "COMPUTATION" | None (for LLM fallback)
     """
-    # LAYER 0: COMPUTATION (code execution) — check BEFORE PARAMETRIC for accuracy
+    # LAYER 0: COMPUTATION (code execution) — check BEFORE everything for accuracy
     # Bash/shell/file system/count operations need direct execution, not LLM
     if _COMPUTATION_PATTERN.search(query):
         return "COMPUTATION"
     
-    # LAYER 1: PARAMETRIC (no retrieval)
-    if _MATH_PATTERN.search(query):
-        return "PARAMETRIC"
-    if _DEFINITION_PATTERN.search(query) and not _CODE_PATTERN.search(query):
-        return "PARAMETRIC"
-    
-    # LAYER 2: SEMANTIC (must retrieve) — checked BEFORE CODE to prioritize real-time data
-    # Real-time data takes highest priority
+    # LAYER 1: SEMANTIC — TIME-SENSITIVE (must retrieve current data)
+    # Checked BEFORE PARAMETRIC so "what is X live news" goes to SEMANTIC, not PARAMETRIC
+    # Real-time data takes highest priority over definition patterns
     if _REAL_TIME_DATA_PATTERN.search(query):
         return "SEMANTIC"  # Market, weather, news, sports ALWAYS need current data
+    
+    if _CURRENT_EVENTS_PATTERN.search(query):
+        return "SEMANTIC"  # today, latest, recent, live, 2024-2029 → always retrieve
     
     if _FINANCIAL_PATTERN.search(query):
         # Financial queries need retrieval unless asking pure conceptual question
         if not _DEFINITION_PATTERN.search(query):
             return "SEMANTIC"
     
-    if _CURRENT_EVENTS_PATTERN.search(query):
-        return "SEMANTIC"
+    # LAYER 2: PARAMETRIC (no retrieval) — only fires if no time-sensitive signals
+    if _MATH_PATTERN.search(query):
+        return "PARAMETRIC"
+    if _DEFINITION_PATTERN.search(query) and not _CODE_PATTERN.search(query):
+        return "PARAMETRIC"
     
     # LAYER 3: CODE (code examples, implementations)
     if _SYNTAX_PATTERN.search(query):

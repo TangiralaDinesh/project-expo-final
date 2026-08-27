@@ -34,13 +34,16 @@ async def run_test_query(query: str):
     """Run a single query through the full pipeline and print results."""
     from .query import run_query
     from .llm.client import get_client
+    from .core.satisfaction import SatisfactionTracker
 
     print(f"\n{'='*60}")
     print(f"  Query: {query}")
     print(f"{'='*60}\n")
 
     try:
-        result = await run_query(query)
+        # Create satisfaction tracker to activate connectivity, resonance, GeoHash, depth adjustments
+        tracker = SatisfactionTracker()
+        result = await run_query(query, satisfaction=tracker)
 
         print(f"\n{'─'*60}")
         print(f"  Gate: {result.gate_decision.mode if result.gate_decision else 'N/A'}")
