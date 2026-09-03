@@ -167,8 +167,13 @@ class NIMClient:
     ) -> str:
         """Non-streaming chat completion. Returns the text of the first choice."""
         model = model or self._cfg.chat_model
-        # Cap timeout at 60s — user may set NIM_CHAT_TIMEOUT=300 but that causes timeout spiral
-        timeout = min(timeout or self._cfg.chat_timeout, 60.0)
+        # Use caller-specified timeout, or config default.
+        # Synthesis calls may need 90s+; fast calls use 15s.
+        # Only cap if no explicit timeout was passed (prevent timeout spiral from config).
+        if timeout > 0:
+            timeout = min(timeout, 120.0)  # Absolute max 120s for any call
+        else:
+            timeout = min(self._cfg.chat_timeout, 60.0)  # Default: capped at 60s
         api_key = await self._next_key()
         sema = self._key_semas.get(api_key, asyncio.Semaphore(5))
 

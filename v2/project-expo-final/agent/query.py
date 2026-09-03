@@ -48,6 +48,10 @@ from .core.query_fanout import fan_out_query, score_pilot_results, select_querie
 from .core.gap_scanner import scan_for_gaps, format_gaps_for_user, _should_run_gap_scan
 from .core.progressive import GeoHashDecisionTree
 from .retrieval.knowledge_coordinator import get_knowledge_coordinator
+from .routing.kg_gate import should_investigate_kg, extract_entities_fast
+from .knowledge.ephemeral_kg import EphemeralKG
+from .core.redundancy import RedundancyTracker
+from .core.speculative_exploration import SpeculativeExplorationEngine
 from .cache.semantic_cache import get_semantic_cache
 from .blocks.semantic.embed import embed_query
 from .config.feature_flags import FeatureFlags
@@ -369,7 +373,50 @@ async def run_query(
     # This eliminates the 5-10s fan-out blocking time.
     
     fan_out_plan = None
+    ephemeral_kg = None
+    redundancy = RedundancyTracker(similarity_threshold=0.65)
+    # Track the original query as already "fired"
+    redundancy.filter_and_track([effective_query], source="original")
     pipeline_deadline = time.time() + 75.0  # 75s total budget for retrieval
+
+    # ── Detective KG Investigation (runs in parallel with everything else) ──
+    async def _do_kg_investigation():
+        """Investigate entities via Wikidata (runs in parallel — no latency cost)."""
+        nonlocal ephemeral_kg
+        try:
+            if not should_investigate_kg(effective_query, gate_result.mode):
+                return
+            if not features.external_kg_enabled:
+                return
+
+            entities = extract_entities_fast(effective_query)
+            if not entities:
+                return
+
+            ephemeral_kg = EphemeralKG(effective_query)
+
+            # Import external KG bridge
+            from .knowledge.external_kg import ExternalKGBridge
+            ext_kg = ExternalKGBridge()
+
+            try:
+                # Parallel investigation of all entities (budget: 3s)
+                investigate_tasks = [
+                    ephemeral_kg.investigate_entity(e, ext_kg, timeout_s=3.0)
+                    for e in entities[:3]
+                ]
+                await asyncio.gather(*investigate_tasks, return_exceptions=True)
+
+                logger.info(
+                    "Detective KG: %d entities investigated, %d total properties, %d aliases",
+                    len(ephemeral_kg.entities),
+                    sum(len(p.properties) for p in ephemeral_kg.entities.values()),
+                    sum(len(p.aliases) for p in ephemeral_kg.entities.values()),
+                )
+            finally:
+                await ext_kg.close()
+        except Exception as e:
+            logger.warning("KG investigation failed (non-critical): %s", e)
 
     async def _do_fan_out():
         """Generate fan-out queries (runs in parallel with orchestrator)."""
@@ -400,21 +447,65 @@ async def run_query(
             intent_analysis=intent_analysis,
         )
 
-    # Fire BOTH in parallel — orchestrator doesn't need fan-out results
-    async with trace.span("parallel_fanout_orchestrator") as parallel_span:
+    # Fire ALL THREE in parallel — KG + fan-out + orchestrator
+    # KG investigation has 0 latency cost (finishes during orchestrator search)
+    async with trace.span("parallel_kg_fanout_orchestrator") as parallel_span:
+        kg_task = asyncio.create_task(_do_kg_investigation())
         fan_out_task = asyncio.create_task(_do_fan_out())
         orch_results = await _do_orchestrator()
         
-        # Wait for fan-out to finish (it usually finishes before orchestrator)
+        # Wait for fan-out + KG to finish (they usually finish before orchestrator)
         try:
-            await asyncio.wait_for(fan_out_task, timeout=2.0)
+            await asyncio.wait_for(
+                asyncio.gather(fan_out_task, kg_task, return_exceptions=True),
+                timeout=2.0,
+            )
         except (asyncio.TimeoutError, Exception):
-            pass  # Fan-out didn't finish in time, that's fine
+            pass  # Didn't finish in time, that's fine
+        
+        # Inject KG-derived queries into fan-out plan
+        if ephemeral_kg and ephemeral_kg.entities:
+            kg_queries = ephemeral_kg.generate_investigation_queries(max_queries=5)
+            if kg_queries:
+                if fan_out_plan is None:
+                    from .core.query_fanout import FanOutPlan
+                    fan_out_plan = FanOutPlan(original_query=effective_query)
+                for kq in kg_queries:
+                    if kq.query not in fan_out_plan.selected_queries:
+                        fan_out_plan.selected_queries.append(kq.query)
+                        fan_out_plan.angle_queries.append(kq.query)
+                logger.info(
+                    "KG-enhanced fan-out: +%d investigation queries (sources: %s)",
+                    len(kg_queries),
+                    [kq.source for kq in kg_queries],
+                )
+                trace.add_attribute(parallel_span, "kg_queries", len(kg_queries))
         
         trace.add_attribute(parallel_span, "subagents", len(orch_results))
 
     # ── Collect all learnings ──
     all_learnings, all_urls = _collect_results(orch_results)
+
+    # ── Initialize Speculative Exploration Engine ──
+    # Feed KG-discovered dimensions into entropy-based exploration
+    spec_engine = None
+    if ephemeral_kg and ephemeral_kg.entities:
+        entities_list = list(ephemeral_kg.entities.keys())
+        spec_engine = SpeculativeExplorationEngine(effective_query, entities=entities_list)
+        for ename, profile in ephemeral_kg.entities.items():
+            spec_engine.ingest_kg_properties(ename, profile.properties)
+            if profile.aliases:
+                spec_engine.ingest_aliases(ename, profile.aliases)
+            if profile.type_hierarchy:
+                spec_engine.ingest_type_hierarchy(ename, profile.type_hierarchy)
+        # Feed initial learnings to update coverage
+        if all_learnings:
+            spec_engine.ingest_learnings(all_learnings)
+        logger.info(
+            "Speculative engine: %d dimensions, total entropy=%.2f, coverage=%s",
+            len(spec_engine.dimensions), spec_engine.total_entropy,
+            {k: f"{v:.1f}" for k, v in list(spec_engine.coverage_summary.items())[:5]},
+        )
 
     # ── Ingest learnings into Knowledge Graph (fire-and-forget) ──
     # KG starts empty each session — this populates it with entity-relation
@@ -449,13 +540,21 @@ async def run_query(
     fan_out_seed_queries = []
     if fan_out_plan and fan_out_plan.selected_queries:
         # Skip the original query (index 0) — orchestrator already used it
-        fan_out_seed_queries = [
+        raw_seeds = [
             q for q in fan_out_plan.selected_queries
             if q.lower().strip() != effective_query.lower().strip()
         ]
+        # Filter through redundancy tracker (removes near-duplicates of original + each other)
+        fan_out_seed_queries = redundancy.filter_and_track(raw_seeds, source="fan_out")
 
-        # If initial retrieval is thin, run fan-out queries as supplementary retrieval
-        if len(all_learnings) < 8 and fan_out_seed_queries:
+        # ── RELEVANCY GATE 1: Only supplement if coverage is genuinely thin ──
+        # Geohash principle: overview first, expand ONLY where gaps exist
+        initial_coverage_thin = len(all_learnings) < 6
+        if spec_engine:
+            # If speculative engine says entropy is low → we already have good coverage
+            initial_coverage_thin = initial_coverage_thin and spec_engine.total_entropy > 0.4
+
+        if initial_coverage_thin and fan_out_seed_queries:
             logger.info(
                 "Initial retrieval thin (%d learnings) — running %d fan-out queries as supplement",
                 len(all_learnings), len(fan_out_seed_queries[:3]),
@@ -508,34 +607,51 @@ async def run_query(
             f"reasoning_round_{retrieval_round + 1}",
             round=retrieval_round + 1,
         ) as reason_span:
-            # ── STEP 1: LLM evaluates current learnings ──
-            # This is the KEY difference — LLM reads the learnings and judges
-            # whether they actually answer the query (not just text overlap)
-            llm_eval_task = evaluate_learnings(
+            # ── STEP 1+2: Parallel LLM evaluation + KG exploration + heuristic ──
+            # These are independent — run simultaneously to save ~3-6s per round
+            entities_for_kg = satisfaction.extract_concepts(effective_query) if satisfaction else []
+
+            eval_coro = evaluate_learnings(
                 effective_query, all_learnings, client=client,
+                round_num=retrieval_round,
             )
-            
-            # Run LLM evaluation + heuristic satisfaction IN PARALLEL
-            heuristic_task = None
+
+            kg_coro = asyncio.wait_for(
+                explore_connected_dots(
+                    effective_query, entities_for_kg, all_learnings, client=client,
+                ),
+                timeout=3.0,
+            )
+
+            heuristic_coro = None
             if satisfaction:
                 concepts = satisfaction.extract_concepts(effective_query)
-                heuristic_task = satisfaction.evaluate_satisfaction(
-                    effective_query, all_learnings, concepts
+                heuristic_coro = satisfaction.evaluate_satisfaction(
+                    effective_query, all_learnings, concepts,
                 )
-            
-            if heuristic_task:
-                llm_eval, heuristic_scores = await asyncio.gather(
-                    llm_eval_task, heuristic_task, return_exceptions=True,
+
+            # Gather all parallel tasks
+            if heuristic_coro:
+                parallel_results = await asyncio.gather(
+                    eval_coro, kg_coro, heuristic_coro,
+                    return_exceptions=True,
                 )
-                if isinstance(heuristic_scores, dict):
-                    satisfaction_scores = heuristic_scores
+                if isinstance(parallel_results[2], dict):
+                    satisfaction_scores = parallel_results[2]
             else:
-                llm_eval = await llm_eval_task
-            
+                parallel_results = await asyncio.gather(
+                    eval_coro, kg_coro,
+                    return_exceptions=True,
+                )
+
+            # Extract results
+            llm_eval = parallel_results[0]
             if isinstance(llm_eval, Exception):
                 logger.warning("LLM evaluation failed: %s", llm_eval)
                 break
-            
+
+            kg_context = parallel_results[1] if isinstance(parallel_results[1], list) else []
+
             llm_quality_score = llm_eval.quality_score
             trace.add_attribute(reason_span, "llm_quality", llm_eval.quality_score)
             trace.add_attribute(reason_span, "llm_sufficient", llm_eval.sufficient)
@@ -565,24 +681,8 @@ async def run_query(
                     logger.info("Resonance says stop: %s", reason)
                     break
             
-            # ── STEP 3: KG exploration + LLM decision ──
-            # KG explore runs first (fast, <100ms since graph is in-memory),
-            # then its context feeds into the LLM decision call.
             
-            entities_for_kg = satisfaction.extract_concepts(effective_query) if satisfaction else []
-            
-            kg_context = []
-            try:
-                kg_context = await asyncio.wait_for(
-                    explore_connected_dots(
-                        effective_query, entities_for_kg, all_learnings, client=client,
-                    ),
-                    timeout=3.0,
-                )
-            except Exception:
-                pass
-            
-            # Decision gets KG context (not empty list anymore!)
+            # ── STEP 3: LLM decision (uses KG context from parallel Step 1+2) ──
             try:
                 decision = await decide_next_action(
                     effective_query, all_learnings,
@@ -624,22 +724,57 @@ async def run_query(
                 if not any(q.lower()[:20] in existing.lower() for existing in gap_queries):
                     gap_queries.append(q)
             
+            # Priority 3.5: Speculative exploration (dynamic entropy-maximizing queries)
+            # ── RELEVANCY GATE 2: Only speculate if entropy is still high ──
+            # Geohash: don't zoom deeper if overview already covers the topic
+            if spec_engine and len(gap_queries) < 4 and spec_engine.total_entropy > 0.3:
+                spec_queries = spec_engine.generate_speculative_queries(
+                    budget=max(2, 4 - len(gap_queries)),
+                    min_gain=0.25,  # Higher threshold than default — be selective
+                )
+                for sq in spec_queries:
+                    if not any(sq.query.lower()[:20] in existing.lower() for existing in gap_queries):
+                        gap_queries.append(sq.query)
+                        logger.debug(
+                            "Speculative query: '%s' (gain=%.2f, dims=%s, reason=%s)",
+                            sq.query, sq.expected_gain, sq.dimensions_covered, sq.reasoning,
+                        )
+
             if not gap_queries:
                 # Fallback: use missing aspects as queries
                 for aspect in llm_eval.missing_aspects[:3]:
                     gap_queries.append(f"{aspect} {effective_query}")
             
             if not gap_queries and fan_out_seed_queries:
-                # Priority 4: Unused fan-out seed queries (consume one per round)
+                # Priority 5: Unused fan-out seed queries (consume one per round)
                 gap_queries.append(fan_out_seed_queries.pop(0))
             
             if not gap_queries:
                 break
             
-            gap_queries = gap_queries[:4]  # Cap at 4 queries
+            # ── RELEVANCY GATE 3: Check if expansion is worth the latency ──
+            # Geohash: at each zoom level, ask "do we NEED more detail?" 
+            # If quality is already decent (>0.6) and we have 8+ learnings,
+            # only expand if the gap queries are genuinely novel (high entropy)
+            if llm_quality_score > 0.6 and len(all_learnings) >= 8:
+                gap_queries = redundancy.select_top_by_entropy(
+                    gap_queries,
+                    max_queries=2,  # Fewer queries when already decent
+                    min_entropy=0.25,  # Higher bar — only truly novel queries
+                )
+            else:
+                gap_queries = redundancy.select_top_by_entropy(
+                    gap_queries,
+                    max_queries=4,
+                    min_entropy=0.1,
+                )
+            
+            if not gap_queries:
+                logger.info("All gap queries redundant — stopping")
+                break
             
             logger.info(
-                "Progressive retrieval round %d: %d gap queries: %s",
+                "Progressive retrieval round %d: %d gap queries (after dedup): %s",
                 retrieval_round + 1, len(gap_queries), gap_queries[:3],
             )
             
@@ -657,10 +792,43 @@ async def run_query(
                 wave_2_learnings, wave_2_urls = _collect_results(wave_2_results)
                 all_learnings.extend(wave_2_learnings)
                 all_urls.extend(wave_2_urls)
+                
+                # Track results for entropy scoring (penalize failed query patterns)
+                for gq in gap_queries:
+                    redundancy.record_result(gq, len(wave_2_learnings))
+                
                 logger.info(
                     "Wave %d complete: +%d learnings, +%d URLs",
                     retrieval_round + 2, len(wave_2_learnings), len(wave_2_urls),
                 )
+
+                # ── Iterative KG Enrichment ──
+                # Feed new learnings back into ephemeral KG → discover new entities
+                # → generate smarter queries for next round
+                if ephemeral_kg and wave_2_learnings:
+                    ephemeral_kg.ingest_learnings(wave_2_learnings)
+                    # Generate fresh investigation queries from enriched KG
+                    fresh_kg_queries = ephemeral_kg.generate_investigation_queries(
+                        max_queries=2,
+                    )
+                    if fresh_kg_queries:
+                        fan_out_seed_queries.extend([q.query for q in fresh_kg_queries])
+                        logger.info(
+                            "KG enrichment: +%d new entities discovered, +%d fresh queries",
+                            len([e for e in ephemeral_kg.entities.values() if e.investigation_depth == 0]),
+                            len(fresh_kg_queries),
+                        )
+
+                # ── Speculative Engine Update ──
+                # Update dimension coverage so next round targets REMAINING gaps
+                if spec_engine and wave_2_learnings:
+                    spec_engine.ingest_learnings(wave_2_learnings)
+                    logger.debug(
+                        "Speculative coverage update: entropy=%.2f, dims=%s",
+                        spec_engine.total_entropy,
+                        {k: f"{v:.1f}" for k, v in list(spec_engine.coverage_summary.items())[:5]},
+                    )
+
             except Exception as e:
                 logger.warning("Re-retrieval round %d failed: %s", retrieval_round + 1, e)
                 break

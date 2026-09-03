@@ -1,0 +1,11 @@
+{
+  "name": "agent-src-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bridge layer: Claude Code src/ tools running as standalone Node.js services",
+  "scripts": {
+    "bridge": "node --experimental-strip-types bridge.ts",
+    "test": "node --experimental-strip-types test_bridge.ts"
+  }
+}

@@ -69,15 +69,22 @@ async def query_knowledge_graph_for_context(
         return []
     
     try:
-        from ..knowledge.graph_rag import GraphRAG
-        graph = GraphRAG()
+        from ..knowledge.graph_store import get_graph_store
+        graph = get_graph_store()
+        if graph.entity_count == 0:
+            return []
+        
         # Extract key terms from query
         terms = [w for w in query.lower().split() if len(w) > 3][:3]
         
         related = []
         for term in terms:
-            neighbors = graph.find_similar_concepts(term, top_k=2)
-            related.extend(neighbors)
+            triples = graph.query_entity(term, hops=1)
+            for t in triples:
+                if t.object.lower() != term:
+                    related.append(t.object)
+                if t.subject.lower() != term:
+                    related.append(t.subject)
         
         return list(set(related))[:5]  # Dedupe and limit
     except Exception as e:

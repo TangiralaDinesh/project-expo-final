@@ -1,8 +1,9 @@
 """
 Agent backend — main entry point.
 
-  python -m agent.main                    # start server
-  python -m agent.main --test "query"     # run a single test query
+  python -m agent.main                        # start server
+  python -m agent.main --test "query"         # run a single test query (v2 pipeline)
+  python -m agent.main --agentic "query"      # run with agentic loop (hybrid mode)
 """
 
 from __future__ import annotations
@@ -76,12 +77,52 @@ async def run_test_query(query: str):
             logger.exception(f"Error during client cleanup: {cleanup_err}")
 
 
+async def run_agentic_query(query: str):
+    """Run a query through the hybrid agentic loop.
+
+    This wraps v2's full pipeline as the `deep_research` tool inside
+    the agentic while(true) loop. The LLM decides what tools to call,
+    can self-correct, and has context compaction + session memory.
+    """
+    from .agentic.loop import run_agentic
+    from .llm.client import get_client
+
+    print(f"\n{'='*60}")
+    print(f"  Agentic Query: {query}")
+    print(f"  Mode: Hybrid (v2 pipeline + agentic loop)")
+    print(f"{'='*60}\n")
+
+    try:
+        client = get_client()
+        result = await run_agentic(query, client=client)
+
+        print(f"\n{'─'*60}")
+        print(f"  Turns: {result.turn_count}")
+        print(f"  Tool Calls: {result.total_tool_calls}")
+        print(f"  Tools Used: {', '.join(result.tools_used) or 'none'}")
+        print(f"  Time: {result.timing_ms:.0f}ms")
+        print(f"{'─'*60}\n")
+        print(result.answer)
+        print(f"\n{'='*60}\n")
+    except Exception as e:
+        print(f"\n{'─'*60}")
+        print(f"  ERROR: {type(e).__name__}: {e}")
+        print(f"{'─'*60}\n")
+        raise
+    finally:
+        try:
+            await get_client().close()
+        except Exception as cleanup_err:
+            logger.exception(f"Error during client cleanup: {cleanup_err}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Agent Research Backend")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host")
     parser.add_argument("--port", type=int, default=8000, help="Bind port")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
-    parser.add_argument("--test", type=str, help="Run a single test query")
+    parser.add_argument("--test", type=str, help="Run a single test query (v2 pipeline)")
+    parser.add_argument("--agentic", type=str, help="Run with agentic loop (hybrid mode)")
     parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes")
     args = parser.parse_args()
 
@@ -89,6 +130,10 @@ def main():
 
     if args.test:
         asyncio.run(run_test_query(args.test))
+        return
+
+    if args.agentic:
+        asyncio.run(run_agentic_query(args.agentic))
         return
 
     # Import here to avoid circular imports during --test

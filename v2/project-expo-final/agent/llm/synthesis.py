@@ -201,10 +201,12 @@ async def global_synthesis_llm(
     messages = _build_synthesis_prompt(query, learnings, prompt_specificity)
     
     # Use adaptive token limit - allows full responses without truncation
+    # Synthesis needs higher timeout (90s) — generates 2000+ tokens
     response = await client.chat(
         messages,
         temperature=0.2,
         max_tokens=adaptive_tokens,
+        timeout=90.0,
     )
     
     # Phase 6: Auto-continuation if truncation detected
@@ -219,6 +221,7 @@ async def global_synthesis_llm(
                 continuation_messages,
                 temperature=0.2,
                 max_tokens=min(adaptive_tokens, 4000),  # Shorter continuation
+                timeout=60.0,
             )
             if continuation and continuation.strip():
                 response = response.rstrip() + "\n\n" + continuation.lstrip()
