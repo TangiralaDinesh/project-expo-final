@@ -57,7 +57,6 @@ async def synthesis_with_zoom(
             learnings=learnings,
             zoom_level=zoom_str,
             client=client,
-            prompt_specificity=prompt_specificity,
         )
     except Exception as e:
         logger.warning(f"Zoom synthesis failed: {e}, falling back to standard")

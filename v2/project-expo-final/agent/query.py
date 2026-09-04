@@ -613,7 +613,6 @@ async def run_query(
 
             eval_coro = evaluate_learnings(
                 effective_query, all_learnings, client=client,
-                round_num=retrieval_round,
             )
 
             kg_coro = asyncio.wait_for(
