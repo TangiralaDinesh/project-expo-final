@@ -348,7 +348,7 @@ async def run_query(
         intent_analysis = await classifier.analyze(
             query,
             satisfaction_tracker=satisfaction,
-            use_llm=False,  # Start with fast heuristic
+            use_llm=True,
         )
         logger.debug(
             f"Intent: {intent_analysis.intent.value}, "
@@ -611,7 +611,11 @@ async def run_query(
         ) as reason_span:
             # ── STEP 1+2: Parallel LLM evaluation + KG exploration + AI Critique + heuristic ──
             # These are independent — run simultaneously to save ~3-6s per round
-            entities_for_kg = satisfaction.extract_concepts(effective_query) if satisfaction else []
+            known_focus = (
+                [fa.name for fa in intent_analysis.focus_areas if fa.name != "query_topic"]
+                if intent_analysis and intent_analysis.focus_areas else None
+            )
+            entities_for_kg = satisfaction.extract_concepts(effective_query, known_entities=known_focus) if satisfaction else []
 
             eval_coro = evaluate_learnings(
                 effective_query, all_learnings, client=client,
@@ -634,7 +638,7 @@ async def run_query(
 
             heuristic_coro = None
             if satisfaction:
-                concepts = satisfaction.extract_concepts(effective_query)
+                concepts = satisfaction.extract_concepts(effective_query, known_entities=known_focus)
                 heuristic_coro = satisfaction.evaluate_satisfaction(
                     effective_query, all_learnings, concepts,
                 )

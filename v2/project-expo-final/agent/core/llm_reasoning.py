@@ -275,15 +275,26 @@ async def evaluate_learnings(
     )
 
     try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a fast retrieval evaluation engine. Output strictly valid JSON. "
+                    "Keep reasoning under 15 words. Do not output markdown code fences or conversational text."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
         response = await client.chat_worker(
-            [{"role": "user", "content": prompt}],
+            messages,
             temperature=0.0,
-            max_tokens=200,
+            max_tokens=512,
             response_format_json=True,
         )
         
         parsed = _parse_json(response)
         if not parsed:
+            logger.warning("LLM evaluation returned invalid JSON, falling back to heuristic. Raw snippet: %s", repr(response)[:120])
             return _heuristic_evaluation(query, learnings)
         
         # Filter out template placeholder queries
@@ -320,22 +331,22 @@ async def evaluate_learnings(
 def _heuristic_evaluation(query: str, learnings: list) -> LearningEvaluation:
     """Fallback heuristic when LLM eval fails."""
     query_terms = set(w.lower() for w in query.split() if len(w) > 3)
-    covered = 0
-    for l in learnings:
-        text = getattr(l, 'text', str(l)).lower()
-        for term in query_terms:
-            if term in text:
-                covered += 1
-                break
+    if not query_terms:
+        query_terms = set(w.lower() for w in query.split() if len(w) > 1)
     
-    coverage = covered / max(len(query_terms), 1)
+    # Calculate unique terms covered across ANY learnings
+    all_text = " ".join(getattr(l, 'text', str(l)).lower() for l in learnings)
+    covered_terms = sum(1 for term in query_terms if term in all_text)
+    
+    coverage = covered_terms / max(len(query_terms), 1)
+    coverage = max(0.0, min(1.0, coverage))
     return LearningEvaluation(
-        sufficient=coverage > 0.7 and len(learnings) >= 3,
+        sufficient=coverage >= 0.8 and len(learnings) >= 5,
         confidence=0.4,
         missing_aspects=[],
         quality_score=coverage,
         follow_up_queries=[],
-        reasoning=f"Heuristic: {coverage:.0%} term coverage",
+        reasoning=f"Heuristic: {covered_terms}/{len(query_terms)} query terms covered ({coverage:.0%})",
     )
 
 
@@ -418,24 +429,38 @@ async def decide_next_action(
     )
 
     try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a research decision engine. Output strictly valid JSON. "
+                    "Keep reasoning under 15 words. No preamble, no conversational text."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
         response = await client.chat_worker(
-            [{"role": "user", "content": prompt}],
+            messages,
             temperature=0.0,
-            max_tokens=200,
+            max_tokens=512,
             response_format_json=True,
         )
         
         parsed = _parse_json(response)
         if not parsed:
-            # Heuristic: stop if quality is decent OR if we have no learnings at all
-            # (0 learnings = search stack is dead, retrying won't help)
-            should_stop = quality_score > 0.6 or len(learnings) == 0
+            logger.warning("decide_next_action: JSON parse failed, using fallback. Raw snippet: %s", repr(response)[:120])
+            # Resilience: On Round 1, NEVER abort retrieval simply because an LLM JSON call had a transient error
+            if round_num <= 1 and len(learnings) > 0:
+                should_stop = False
+            else:
+                should_stop = (quality_score > 0.85 and len(learnings) >= 6) or (len(learnings) == 0 and round_num >= 2)
+            
             return ReasoningDecision(
                 action="stop" if should_stop else "continue",
                 target="",
                 queries=[query + " detailed facts data"] if not should_stop else [],
                 confidence=0.4,
-                reasoning="JSON parse failed, using heuristic" + (" (no learnings)" if len(learnings) == 0 else ""),
+                reasoning="JSON parse failed, using safe fallback" + (" (continue retrieval)" if not should_stop else " (stop)"),
             )
         
         # Filter out any queries that look like template examples
@@ -461,13 +486,16 @@ async def decide_next_action(
         
     except Exception as e:
         logger.warning("LLM decision failed: %s", e)
-        should_stop = quality_score > 0.6 or len(learnings) == 0
+        if round_num <= 1 and len(learnings) > 0:
+            should_stop = False
+        else:
+            should_stop = (quality_score > 0.85 and len(learnings) >= 6) or (len(learnings) == 0 and round_num >= 2)
         return ReasoningDecision(
             action="stop" if should_stop else "continue",
             target="",
-            queries=[],
+            queries=[query + " detailed facts data"] if not should_stop else [],
             confidence=0.3,
-            reasoning=f"LLM decision failed: {e}" + (" (no learnings)" if len(learnings) == 0 else ""),
+            reasoning=f"LLM decision failed ({type(e).__name__}): {e}" + (" (continue retrieval)" if not should_stop else " (stop)"),
         )
 
 

@@ -143,7 +143,13 @@ class IntentClassifier:
         
         # Run LLM entity extraction + optional LLM intent analysis IN PARALLEL
         tasks = [self._llm_entity_extract(query)]
-        if heuristic_result.confidence < 0.7:
+        needs_llm_intent = (
+            heuristic_result.confidence < 0.7 or
+            len(heuristic_result.focus_areas) < 2 or
+            any(fa.name == "query_topic" for fa in heuristic_result.focus_areas) or
+            heuristic_result.intent in (QueryIntent.COMPARISON, QueryIntent.MULTI_TASK)
+        )
+        if needs_llm_intent:
             tasks.append(self._analyze_llm(query, satisfaction_tracker))
         
         try:
@@ -403,9 +409,12 @@ class IntentClassifier:
         
         try:
             raw = await self.client.chat_worker(
-                [{"role": "user", "content": prompt}],
+                [
+                    {"role": "system", "content": "You are a fast entity extractor. Output ONLY a valid JSON array of entity strings. No preamble, no conversational text."},
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.0,
-                max_tokens=80,
+                max_tokens=256,
             )
             
             import json
@@ -593,12 +602,17 @@ Respond with JSON:
         
         merged_focus_areas = {}
         
-        # Add heuristic focus areas
+        # Add heuristic focus areas, but filter out dummy placeholder if LLM provided real areas
+        real_llm_areas = [fa for fa in llm.focus_areas if fa.name.lower() not in {"query_topic", "topic", "general"}]
         for fa in heuristic.focus_areas:
+            if fa.name.lower() in {"query_topic", "topic", "general"} and real_llm_areas:
+                continue
             merged_focus_areas[fa.name] = fa
         
         # Update with LLM focus areas (may override relevance scores)
         for fa in llm.focus_areas:
+            if fa.name.lower() in {"query_topic", "topic", "general"} and real_llm_areas:
+                continue
             if fa.name in merged_focus_areas:
                 # Update relevance from LLM
                 merged_focus_areas[fa.name].relevance = fa.relevance
@@ -609,12 +623,23 @@ Respond with JSON:
         combined_areas = list(merged_focus_areas.values())
         combined_areas.sort(key=lambda x: x.relevance, reverse=True)
         
+        requires_parallel = (
+            llm.requires_parallel or 
+            heuristic.requires_parallel or 
+            llm.intent == QueryIntent.MULTI_TASK or
+            (len(combined_areas) > 1 and llm.intent in (QueryIntent.MULTI_TASK, QueryIntent.COMPARISON, QueryIntent.DECISION))
+        )
+        
+        suggested_decomp = llm.suggested_decomposition
+        if llm.intent == QueryIntent.MULTI_TASK and len(combined_areas) > 1:
+            suggested_decomp = "parallel"
+        
         return QueryIntentAnalysis(
             intent=llm.intent,  # Trust LLM intent
             confidence=max(heuristic.confidence, llm.confidence),
             focus_areas=combined_areas,
             requires_comparison=llm.requires_comparison or heuristic.requires_comparison,
-            requires_parallel=llm.requires_parallel or heuristic.requires_parallel,
-            suggested_decomposition=llm.suggested_decomposition,
+            requires_parallel=requires_parallel,
+            suggested_decomposition=suggested_decomp,
             reasoning=f"Blended analysis: LLM intent={llm.intent.value}, focus_areas={len(combined_areas)}"
         )

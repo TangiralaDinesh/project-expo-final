@@ -310,8 +310,15 @@ class SatisfactionTracker:
 
     # ── Phase 1: Per-Concept Satisfaction Tracking ──
 
-    def extract_concepts(self, query: str) -> list[str]:
+    def extract_concepts(
+        self, 
+        query: str, 
+        known_entities: Optional[list[str]] = None,
+    ) -> list[str]:
         """Extract key concepts from a query.
+        
+        If known_entities (e.g. from LLM intent analysis) are provided, uses them directly.
+        Otherwise falls back to keyword cleaning.
         
         Examples:
           "CDSL vs EMVEE" → ["CDSL", "EMVEE"]
@@ -319,7 +326,15 @@ class SatisfactionTracker:
         
         Returns: list of concept strings
         """
-        # Simple extraction: capitalize words, remove common words
+        if known_entities:
+            clean_entities = [
+                str(e).strip() for e in known_entities 
+                if str(e).strip() and str(e).strip().lower() not in {"query_topic", "topic", "general"}
+            ]
+            if clean_entities:
+                return list(dict.fromkeys(clean_entities))[:6]
+
+        # Fallback heuristic extraction:
         words = query.split()
         stopwords = {
             "vs", "versus", "and", "or", "the", "a", "an", "for", "to", "of", "in", "by", "with",

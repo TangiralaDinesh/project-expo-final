@@ -178,7 +178,7 @@ async def decompose_task(
             intent_analysis = await classifier.analyze(
                 task,
                 satisfaction_tracker=satisfaction_tracker,
-                use_llm=False,  # Fast heuristic for first pass
+                use_llm=True,
             )
             logger.debug(
                 f"Intent analysis: {intent_analysis.intent.value}, "
