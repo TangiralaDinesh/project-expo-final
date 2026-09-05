@@ -39,6 +39,62 @@ class RedundancyTracker:
         self._fired_raw: list[str] = []   # Original query strings
         self._result_counts: dict[str, int] = {}  # query → learnings received
 
+    def is_redundant(
+        self,
+        query: str,
+        threshold: Optional[float] = None,
+    ) -> bool:
+        """Check if a single query is redundant against previously fired queries.
+        
+        Returns True if:
+          - query is empty, None, or too short (< 5 characters)
+          - query contains no meaningful tokens after stopword removal
+          - query has word-overlap Jaccard similarity > threshold with ANY
+            previously fired query.
+        Returns False if the query is sufficiently novel.
+        """
+        if hasattr(query, "query"):
+            query = getattr(query, "query")
+        elif not isinstance(query, str):
+            query = str(query) if query is not None else ""
+
+        q_clean = query.strip()
+        if not q_clean or len(q_clean) < 5:
+            return True
+
+        q_words = self._tokenize(q_clean)
+        if not q_words:
+            return True
+
+        thresh = threshold if threshold is not None else self._threshold
+        for fired_words in self._fired:
+            if self._jaccard(q_words, fired_words) > thresh:
+                return True
+
+        return False
+
+    def track(self, query: str) -> bool:
+        """Track a single fired query in the history.
+        
+        Returns True if successfully tracked, False if empty or too short.
+        """
+        if hasattr(query, "query"):
+            query = getattr(query, "query")
+        elif not isinstance(query, str):
+            query = str(query) if query is not None else ""
+
+        q_clean = query.strip()
+        if not q_clean or len(q_clean) < 5:
+            return False
+
+        q_words = self._tokenize(q_clean)
+        if not q_words:
+            return False
+
+        self._fired.append(q_words)
+        self._fired_raw.append(q_clean)
+        return True
+
     def filter_and_track(
         self,
         queries: list[str],
@@ -48,33 +104,35 @@ class RedundancyTracker:
         """Filter out near-duplicates and track what we fire.
         
         Returns only queries that are sufficiently different from ALL
-        previously fired queries.
+        previously fired queries and other queries in this batch.
         """
         kept = []
         for q in queries:
-            q_clean = q.strip()
+            if hasattr(q, "query"):
+                q_clean = getattr(q, "query", "").strip()
+            elif isinstance(q, str):
+                q_clean = q.strip()
+            else:
+                q_clean = str(q).strip() if q is not None else ""
+
             if not q_clean or len(q_clean) < 5:
+                continue
+
+            # Check against previously fired queries
+            if self.is_redundant(q_clean):
                 continue
 
             q_words = self._tokenize(q_clean)
 
-            # Check against ALL previously fired queries
-            is_redundant = False
-            for fired_words in self._fired:
-                jaccard = self._jaccard(q_words, fired_words)
-                if jaccard > self._threshold:
-                    is_redundant = True
+            # Check against queries we're keeping in THIS batch
+            is_dup_in_batch = False
+            for kept_q in kept:
+                kept_words = self._tokenize(kept_q)
+                if self._jaccard(q_words, kept_words) > self._threshold:
+                    is_dup_in_batch = True
                     break
 
-            # Also check against queries we're keeping in THIS batch
-            if not is_redundant:
-                for kept_q in kept:
-                    kept_words = self._tokenize(kept_q)
-                    if self._jaccard(q_words, kept_words) > self._threshold:
-                        is_redundant = True
-                        break
-
-            if not is_redundant:
+            if not is_dup_in_batch:
                 kept.append(q_clean)
                 self._fired.append(q_words)
                 self._fired_raw.append(q_clean)

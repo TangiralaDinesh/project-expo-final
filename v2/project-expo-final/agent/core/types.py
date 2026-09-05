@@ -83,6 +83,13 @@ class Learning:
     score: float = 0.0
     title: str = ""                      # Source document title
     citation_id: str = ""                # e.g., "[1]" — assigned before synthesis
+    url: str = ""                        # Alias for source_url
+
+    def __post_init__(self):
+        if not self.source_url and self.url:
+            self.source_url = self.url
+        elif not self.url and self.source_url:
+            self.url = self.source_url
 
 
 @dataclass

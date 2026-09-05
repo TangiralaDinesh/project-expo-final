@@ -59,7 +59,7 @@ class NIMSettings:
     fast_model: str = field(default_factory=lambda: _env(
         "NIM_FAST_MODEL", "nvidia/llama-3.1-nemotron-ultra-253b-v1"))
     embed_model: str = field(default_factory=lambda: _env(
-        "NIM_EMBED_MODEL", "nvidia/nv-embedqa-e5-v5"))
+        "NIM_EMBED_MODEL", "nvidia/llama-3.2-nv-embedqa-1b-v1"))
 
     # Multi-key round-robin — 2 keys from separate accounts = 2× throughput
     api_keys: list[str] = field(default_factory=lambda: _env_list("NVIDIA_API_KEY", fallback_key="NIM_API_KEY"))

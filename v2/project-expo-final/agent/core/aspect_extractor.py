@@ -266,13 +266,37 @@ Respond with ONLY valid JSON:
 }}"""
         
         try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an automated aspect extraction engine. Output strictly raw JSON. "
+                        "CRITICAL: Do NOT output conversational monologue, 'Here\\'s a thinking process', or preamble. "
+                        "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '{' and end with '}'."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ]
             response = await self.client.chat_fast(
-                [{"role": "user", "content": prompt}],
+                messages,
                 temperature=0.1,
                 response_format_json=True
             )
             
-            data = json.loads(response)
+            text = response.strip()
+            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', text)
+            if match:
+                text = match.group(1).strip()
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                text = text[start:end+1]
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                cleaned = re.sub(r',\s*([\]}])', r'\1', text)
+                data = json.loads(cleaned)
             
             # Convert to Aspect objects
             aspects = [

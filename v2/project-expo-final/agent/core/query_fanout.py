@@ -77,10 +77,22 @@ Answer: ["top developer laptops 2024 coding", "programmer notebook recommendatio
 Now generate for MY query. Return ONLY a JSON array of strings:"""
 
     try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a search query expansion engine. Output strictly a raw JSON array of search strings. "
+                    "CRITICAL: Do NOT output conversational monologue, 'Here\\'s a thinking process', or preamble. "
+                    "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '[' and end with ']'."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
         response = await client.chat_worker(
-            [{"role": "user", "content": prompt}],
-            temperature=0.5,
+            messages,
+            temperature=0.3,
             max_tokens=256,
+            response_format_json=True,
         )
 
         import json
@@ -123,10 +135,22 @@ Answer: ["React framework advantages benefits 2024", "React limitations performa
 Now generate for MY query. Return ONLY a JSON array of strings:"""
 
     try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a multi-angle research query generator. Output strictly a raw JSON array of search strings. "
+                    "CRITICAL: Do NOT output conversational monologue, 'Here\\'s a thinking process', or preamble. "
+                    "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '[' and end with ']'."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
         response = await client.chat_worker(
-            [{"role": "user", "content": prompt}],
-            temperature=0.5,
+            messages,
+            temperature=0.3,
             max_tokens=256,
+            response_format_json=True,
         )
 
         import json

@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import random
 import math
@@ -37,6 +38,94 @@ from ..config.budgets import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _enforce_json_system_prompt(messages: list[dict]) -> list[dict]:
+    """Ensure messages contain a strict instruction to return raw JSON and forbid thinking preambles."""
+    msg_copy = [dict(m) for m in messages]
+    directive = (
+        "CRITICAL: Output strictly raw machine-readable JSON only. "
+        "Do NOT output conversational monologue, 'Here\\'s a thinking process', chain-of-thought, or preamble. "
+        "Do NOT wrap output in markdown code fences like ```json ... ```. "
+        "Begin your output immediately with the character '{' or '[' and end with '}' or ']'."
+    )
+    if msg_copy and msg_copy[0].get("role") == "system":
+        content = msg_copy[0].get("content", "")
+        if "raw machine-readable JSON" not in content and "strictly raw" not in content:
+            msg_copy[0]["content"] = f"{content}\n\n{directive}"
+    else:
+        msg_copy.insert(0, {
+            "role": "system",
+            "content": f"You are an automated API backend that outputs raw machine-readable JSON.\n{directive}",
+        })
+    return msg_copy
+
+
+def _sanitize_json_response(raw: str) -> str:
+    """Extract and validate JSON substring if model included thinking monologue or markdown fences."""
+    if not raw or not isinstance(raw, str):
+        return raw
+
+    # 1. Strip thinking tags <think>...</think>
+    text = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+
+    # 2. Check if already valid JSON
+    try:
+        json.loads(text)
+        return text
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 3. Check for markdown code fences ```(?:json)? ... ```
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', text)
+    if match:
+        block = match.group(1).strip()
+        try:
+            json.loads(block)
+            return block
+        except (json.JSONDecodeError, TypeError):
+            cleaned_block = re.sub(r',\s*([\]}])', r'\1', block)
+            try:
+                json.loads(cleaned_block)
+                return cleaned_block
+            except (json.JSONDecodeError, TypeError):
+                text = block
+
+    # 4. Extract outer { ... } or [ ... ]
+    first_brace = text.find('{')
+    first_bracket = text.find('[')
+
+    if first_brace != -1 and (first_bracket == -1 or first_brace < first_bracket):
+        last_brace = text.rfind('}')
+        if last_brace > first_brace:
+            candidate = text[first_brace:last_brace+1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, TypeError):
+                cleaned = re.sub(r',\s*([\]}])', r'\1', candidate)
+                try:
+                    json.loads(cleaned)
+                    return cleaned
+                except (json.JSONDecodeError, TypeError):
+                    return candidate
+
+    elif first_bracket != -1:
+        last_bracket = text.rfind(']')
+        if last_bracket > first_bracket:
+            candidate = text[first_bracket:last_bracket+1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, TypeError):
+                cleaned = re.sub(r',\s*([\]}])', r'\1', candidate)
+                try:
+                    json.loads(cleaned)
+                    return cleaned
+                except (json.JSONDecodeError, TypeError):
+                    return candidate
+
+    return text
 
 
 class NIMClient:
@@ -177,6 +266,9 @@ class NIMClient:
         api_key = await self._next_key()
         sema = self._key_semas.get(api_key, asyncio.Semaphore(5))
 
+        if response_format_json:
+            messages = _enforce_json_system_prompt(messages)
+
         body: dict = {
             "model": model,
             "messages": messages,
@@ -201,7 +293,10 @@ class NIMClient:
                     data = await resp.json()
                     return data["choices"][0]["message"]["content"]
 
-        return await self._call_with_backoff(_do)
+        raw_res = await self._call_with_backoff(_do)
+        if response_format_json:
+            return _sanitize_json_response(raw_res)
+        return raw_res
 
     async def chat_fast(
         self,
@@ -233,6 +328,9 @@ class NIMClient:
     ) -> str:
         """Dedicated worker for non-thinking high-speed semantic tasks via Groq.
         Falls back to NIM with tight timeout when Groq is unavailable."""
+        if response_format_json:
+            messages = _enforce_json_system_prompt(messages)
+
         # Thread-safe round-robin for Groq keys
         keys = self._cfg.groq_api_keys if self._cfg.groq_api_keys else ([self._cfg.groq_api_key] if self._cfg.groq_api_key else [])
         
@@ -265,7 +363,10 @@ class NIMClient:
                         data = await resp.json()
                         return data["choices"][0]["message"]["content"]
 
-            return await self._call_with_backoff(_nim_fast, max_retries=1)
+            raw_res = await self._call_with_backoff(_nim_fast, max_retries=1)
+            if response_format_json:
+                return _sanitize_json_response(raw_res)
+            return raw_res
         
         # Groq available — use it (fast path)
         async with self._key_lock:
@@ -299,7 +400,10 @@ class NIMClient:
                 data = await resp.json()
                 return data["choices"][0]["message"]["content"]
 
-        return await self._call_with_backoff(_do)
+        raw_res = await self._call_with_backoff(_do)
+        if response_format_json:
+            return _sanitize_json_response(raw_res)
+        return raw_res
 
     # ----- Streaming chat ----------------------------------------------------
 

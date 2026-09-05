@@ -100,6 +100,7 @@ def _safe_parse_json_dict(raw: str) -> dict:
     if not raw or not isinstance(raw, str):
         return {}
     raw_str = raw.strip()
+    raw_str = re.sub(r'<think>.*?</think>', '', raw_str, flags=re.DOTALL).strip()
     try:
         data = json.loads(raw_str)
         if isinstance(data, dict):
@@ -115,7 +116,13 @@ def _safe_parse_json_dict(raw: str) -> dict:
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, TypeError):
-            pass
+            try:
+                cleaned_commas = re.sub(r',\s*([\]}])', r'\1', cleaned)
+                data = json.loads(cleaned_commas)
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, TypeError):
+                pass
     # Search for first { ... } block
     m = re.search(r"\{.*\}", raw_str, re.DOTALL)
     if m:
@@ -124,7 +131,13 @@ def _safe_parse_json_dict(raw: str) -> dict:
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, TypeError):
-            pass
+            try:
+                cleaned_commas = re.sub(r',\s*([\]}])', r'\1', m.group(0))
+                data = json.loads(cleaned_commas)
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, TypeError):
+                pass
     return {}
 
 
@@ -276,8 +289,19 @@ Respond with JSON:
 }}"""
         
         try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a critical research auditor identifying missing information gaps. Output strictly raw JSON. "
+                        "CRITICAL: Do NOT output conversational monologue, 'Here\\'s a thinking process', or preamble. "
+                        "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '{' and end with '}'."
+                    ),
+                },
+                {"role": "user", "content": full_prompt},
+            ]
             raw = await client.chat_worker(
-                [{"role": "user", "content": full_prompt}],
+                messages,
                 temperature=CRITIQUE_TEMPERATURE,
                 response_format_json=True,
             )

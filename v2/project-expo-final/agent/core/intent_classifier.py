@@ -419,10 +419,15 @@ class IntentClassifier:
             
             import json
             text = raw.strip()
+            # Strip <think>...</think> tags
+            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
             # Extract JSON array
             match = re.search(r'\[.*?\]', text, re.DOTALL)
             if match:
-                entities = json.loads(match.group())
+                try:
+                    entities = json.loads(match.group())
+                except Exception:
+                    entities = []
                 if isinstance(entities, list):
                     # Validate — reject if template placeholders were echoed
                     clean = [str(e).strip() for e in entities if str(e).strip() and len(str(e)) > 1]
@@ -513,58 +518,158 @@ class IntentClassifier:
         
         return stages
     
+    @staticmethod
+    def _clean_and_parse_json(text: str) -> dict:
+        """Extract valid JSON dict from LLM response (handles thinking tags, markdown fences, trailing commas)."""
+        if not text:
+            raise ValueError("Empty response")
+        clean = text.strip()
+        # 1. Strip <think>...</think> tags if present
+        clean = re.sub(r'<think>.*?</think>', '', clean, flags=re.DOTALL).strip()
+        # 2. Try direct parse
+        try:
+            return json.loads(clean)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # 3. Check for markdown code fence
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', clean)
+        if match:
+            candidate = match.group(1).strip()
+            try:
+                return json.loads(candidate)
+            except (json.JSONDecodeError, TypeError):
+                clean = candidate
+        # 4. Extract outer { ... }
+        start = clean.find('{')
+        end = clean.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            candidate = clean[start:end+1]
+            try:
+                return json.loads(candidate)
+            except (json.JSONDecodeError, TypeError):
+                # Clean trailing commas
+                candidate_cleaned = re.sub(r',\s*([\]}])', r'\1', candidate)
+                return json.loads(candidate_cleaned)
+
+        raise ValueError(f"Could not extract valid JSON object from: {clean[:100]}")
+
     async def _analyze_llm(
         self,
         query: str,
         satisfaction_tracker: Optional[SatisfactionTracker] = None,
-    ) -> QueryIntentAnalysis:
+    ) -> Optional[QueryIntentAnalysis]:
         """Use LLM for sophisticated intent analysis."""
         
         guidance = ""
         if satisfaction_tracker:
             concepts = satisfaction_tracker.extract_concepts(query)
-            guidance = f"\nBased on user history, key concepts of interest: {', '.join(concepts[:5])}"
+            guidance = f"\nKey context concepts: {', '.join(concepts[:5])}"
         
-        prompt = f"""Analyze this query to determine user intent and focus areas:
+        prompt = f"""Analyze this query to determine user intent, focus areas, and decomposition strategy:
 
 Query: "{query}"{guidance}
 
 Classify the intent as ONE of:
-- "narrative": storytelling or information gathering about a sequence/relationship
-- "comparison": evaluating/comparing multiple options
-- "research": factual questions (who/what/when/where/why)
-- "decision": choosing between options
-- "analysis": deep understanding of how something works
-- "multi_task": multiple independent concepts to explore
-- "troubleshooting": fixing a problem
-- "creative": generating/creating content
-- "calculation": computing numeric results
+- "narrative": storytelling or information gathering about a sequence or relationship
+- "comparison": evaluating or comparing multiple options, actors, tools, or entities
+- "research": factual information retrieval answering who, what, when, where, or why
+- "decision": choosing between options or evaluating alternatives
+- "analysis": deep technical understanding of how something works or its architecture
+- "multi_task": multiple distinct concepts, entities, or deliverables to explore in parallel
+- "troubleshooting": debugging, resolving an error, or fixing an operational problem
+- "creative": generating, designing, or synthesizing novel creative content
+- "calculation": computing numeric formulas, quantitative metrics, or financial figures
 
-Respond with JSON:
+Focus Area Extraction Guidelines:
+1. Extract the core subject entities or concepts (e.g. people, frameworks, algorithms, technologies).
+2. Fix any obvious typos or misspellings in entity names (e.g. "tom holland or zebdya" -> "Tom Holland", "Zendaya").
+3. Assign each focus area an entity type ("person", "tool", "concept", "organization", "place", etc.).
+4. Assign relevance from 0.0 to 1.0 based on importance to answering the query.
+
+Few-Shot Examples:
+Query: "tom holland or zebdya who have more block busters"
+Output:
 {{
-  "intent": "one_of_above",
-  "confidence": 0.0_to_1.0,
+  "intent": "comparison",
+  "confidence": 0.95,
   "focus_areas": [
-    {{"name": "entity_name", "type": "person|tool|concept|etc", "relevance": 0.0_to_1.0}},
-    ...
+    {{"name": "Tom Holland", "type": "person", "relevance": 1.0}},
+    {{"name": "Zendaya", "type": "person", "relevance": 0.95}}
   ],
-  "is_comparison": true_or_false,
-  "is_parallel": true_or_false,
-  "decomposition": "single|parallel|sequential|hierarchical",
+  "is_comparison": true,
+  "is_parallel": true,
+  "decomposition": "parallel_with_synthesis",
+  "reasoning": "Direct comparison of blockbuster movie counts between two actors"
+}}
+
+Query: "research about elephant and create pptx of it"
+Output:
+{{
+  "intent": "multi_task",
+  "confidence": 0.95,
+  "focus_areas": [
+    {{"name": "Elephant Research", "type": "concept", "relevance": 1.0}},
+    {{"name": "Presentation Creation", "type": "tool", "relevance": 0.9}}
+  ],
+  "is_comparison": false,
+  "is_parallel": true,
+  "decomposition": "parallel",
+  "reasoning": "User wants factual research on elephants combined with presentation generation"
+}}
+
+Now analyze MY query: "{query}".
+Respond with ONLY a valid JSON object matching this schema:
+{{
+  "intent": "one of the 9 intents above",
+  "confidence": 0.0 to 1.0,
+  "focus_areas": [
+    {{"name": "clean_entity_name", "type": "person|tool|concept|etc", "relevance": 0.0 to 1.0}}
+  ],
+  "is_comparison": true or false,
+  "is_parallel": true or false,
+  "decomposition": "single|parallel|sequential|parallel_with_synthesis",
   "reasoning": "brief explanation"
 }}"""
         
         try:
             response = await self.client.chat_fast(
-                [{"role": "user", "content": prompt}],
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an automated query intent classification and entity analysis engine. "
+                            "Output strictly raw machine-readable JSON only. "
+                            "CRITICAL: Do NOT output conversational monologue, 'Here\\'s a thinking process', chain-of-thought, or preamble. "
+                            "Do NOT wrap output in markdown code blocks. Start your response IMMEDIATELY with '{' and end with '}'."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.1,
                 response_format_json=True
             )
             
-            data = json.loads(response)
+            data = self._clean_and_parse_json(response)
             
-            # Convert to QueryIntentAnalysis
-            intent = QueryIntent(data.get("intent", "narrative"))
+            # Convert to QueryIntent with synonym handling
+            raw_intent = str(data.get("intent", "narrative")).lower().strip()
+            intent_map = {
+                "compare": QueryIntent.COMPARISON,
+                "comparing": QueryIntent.COMPARISON,
+                "decide": QueryIntent.DECISION,
+                "analyze": QueryIntent.ANALYSIS,
+                "calculating": QueryIntent.CALCULATION,
+                "compute": QueryIntent.CALCULATION,
+                "multitask": QueryIntent.MULTI_TASK,
+                "multi-task": QueryIntent.MULTI_TASK,
+            }
+            if raw_intent in intent_map:
+                intent = intent_map[raw_intent]
+            else:
+                try:
+                    intent = QueryIntent(raw_intent)
+                except ValueError:
+                    intent = QueryIntent.NARRATIVE
             
             focus_areas = [
                 FocusArea(
@@ -575,20 +680,21 @@ Respond with JSON:
                     retrieval_depth="comprehensive" if fa.get("relevance", 0) > 0.7 else "summary",
                 )
                 for fa in data.get("focus_areas", [])
+                if isinstance(fa, dict) and fa.get("name")
             ]
             
             return QueryIntentAnalysis(
                 intent=intent,
-                confidence=data.get("confidence", 0.5),
+                confidence=float(data.get("confidence", 0.5)),
                 focus_areas=focus_areas,
-                requires_comparison=data.get("is_comparison", False),
-                requires_parallel=data.get("is_parallel", False),
-                suggested_decomposition=data.get("decomposition", "single"),
-                reasoning=data.get("reasoning", "LLM analysis"),
+                requires_comparison=bool(data.get("is_comparison", False)),
+                requires_parallel=bool(data.get("is_parallel", False)),
+                suggested_decomposition=str(data.get("decomposition", "single")),
+                reasoning=str(data.get("reasoning", "LLM analysis")),
             )
         except Exception as e:
-            logger.error(f"LLM intent analysis failed: {e}")
-            raise
+            logger.warning(f"LLM intent analysis failed: {e}")
+            return None
     
     def _blend_results(
         self,

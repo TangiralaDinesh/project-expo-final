@@ -106,10 +106,22 @@ Ensure questions are:
 """
     
     try:
-        response = await client.chat(
-            [{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=1024,
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a research question formulation engine. Output strictly a raw JSON array of question objects. "
+                    "CRITICAL: Do NOT output conversational monologue, 'Here\\'s a thinking process', or preamble. "
+                    "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '[' and end with ']'."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
+        response = await client.chat_worker(
+            messages,
+            temperature=0.3,
+            max_tokens=512,
+            response_format_json=True,
         )
         
         # Extract JSON from response

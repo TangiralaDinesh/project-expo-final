@@ -180,13 +180,38 @@ Respond with JSON:
 Only include entities that are actually being compared. Be strict about relevance (>0.7)."""
         
         try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an automated comparison detection engine. Output strictly raw JSON. "
+                        "CRITICAL: Do NOT output conversational monologue, 'Here\\'s a thinking process', or preamble. "
+                        "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '{' and end with '}'."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ]
             response = await self.client.chat_fast(
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 response_format_json=True,
             )
             
             import json
-            data = json.loads(response)
+            import re
+            text = response.strip()
+            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', text)
+            if match:
+                text = match.group(1).strip()
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                text = text[start:end+1]
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                cleaned = re.sub(r',\s*([\]}])', r'\1', text)
+                data = json.loads(cleaned)
             
             entities = [
                 ComparisonEntity(

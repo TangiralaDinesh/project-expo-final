@@ -854,7 +854,7 @@ async def run_query(
                             from .core.types import Learning
                             all_learnings.append(Learning(
                                 text=comp_learning["text"],
-                                url=comp_learning.get("source_url", "self_computation"),
+                                source_url=comp_learning.get("source_url", "self_computation"),
                                 title=comp_learning.get("title", "Computation"),
                             ))
                             logger.info("Self-tool computation added to learnings: %s", comp_learning["title"])
@@ -865,6 +865,8 @@ async def run_query(
                 break
 
             gap_queries = final_candidates[:4]
+            # Track fired gap queries in redundancy tracker so future rounds know they were searched
+            redundancy.filter_and_track(gap_queries, source=f"progressive_round_{retrieval_round + 1}")
             
             logger.info(
                 "Progressive retrieval round %d: %d gap queries (multi-channel): %s",

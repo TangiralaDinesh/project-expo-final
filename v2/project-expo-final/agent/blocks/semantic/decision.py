@@ -69,7 +69,19 @@ Respond with ONLY a JSON object:
 
 def _parse_decision(raw: str) -> dict:
     try:
-        parsed = json.loads(raw)
+        clean = re.sub(r'<think>.*?</think>', '', str(raw), flags=re.DOTALL).strip()
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', clean)
+        if match:
+            clean = match.group(1).strip()
+        start = clean.find('{')
+        end = clean.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            clean = clean[start:end+1]
+        try:
+            parsed = json.loads(clean)
+        except json.JSONDecodeError:
+            cleaned = re.sub(r',\s*([\]}])', r'\1', clean)
+            parsed = json.loads(cleaned)
         # Ensure Phase 1 fields are present with defaults
         if "is_comparison_query" not in parsed:
             parsed["is_comparison_query"] = False

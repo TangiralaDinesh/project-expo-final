@@ -65,16 +65,22 @@ class ReasoningDecision:
 
 # ── Entity-Specific Question Generation ──
 
-_ENTITY_QUESTIONS_PROMPT = """I need to answer this question: "{query}"
+_ENTITY_QUESTIONS_PROMPT = """I need to conduct targeted research to answer this query: "{query}"
 
-The key entities involved are: {entities}
+Key entities to investigate: {entities}
 
-For EACH entity, generate 2 specific web search queries that will retrieve the exact data I need to answer the question. Do NOT just search the entity name — search for the specific facts needed.
+For EACH entity, generate 2 specific web search queries that will retrieve the exact factual, numerical, or comparative data needed to answer the query. Do NOT just search the entity name alone — search for the specific metrics, statistics, and records required.
+
+Research Guidelines:
+1. Target Concrete Facts: Focus on empirical data, verified numbers, career statistics, chronological records, or primary sources.
+2. Avoid Generic Searches: Search for specific discriminating keywords (e.g. "Tom Holland worldwide box office gross numbers" rather than "Tom Holland").
+3. Comparative Symmetry: Formulate parallel search queries to capture comparable metrics across all entities.
 
 Example: If question is "who sold more albums, Drake or Kanye" and entities are ["Drake", "Kanye West"]:
-{{"plans":[{{"entity":"Drake","search_queries":["Drake total album sales worldwide certified units","Drake discography Billboard chart records"],"priority":0.9,"reasoning":"Need Drake album sales data"}},{{"entity":"Kanye West","search_queries":["Kanye West total album sales worldwide certified","Kanye West discography sales records"],"priority":0.9,"reasoning":"Need Kanye sales data for comparison"}}]}}
+{{"plans":[{{"entity":"Drake","search_queries":["Drake total album sales worldwide certified units","Drake discography Billboard chart records"],"priority":0.95,"reasoning":"Need Drake certified album sales data"}},{{"entity":"Kanye West","search_queries":["Kanye West total album sales worldwide certified","Kanye West discography sales records"],"priority":0.95,"reasoning":"Need Kanye sales data for comparison"}}]}}
 
-Now generate for MY question. Return valid JSON only:"""
+Now generate research plans for MY question: "{query}".
+Return valid JSON only:"""
 
 
 async def generate_entity_research_plans(
@@ -107,7 +113,17 @@ async def generate_entity_research_plans(
 
     try:
         response = await client.chat_worker(
-            [{"role": "user", "content": prompt}],
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an automated query planning engine. Output strictly raw JSON. "
+                        "CRITICAL: Do NOT output 'Here\\'s a thinking process', chain of thought, or preamble. "
+                        "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '{' and end with '}'."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.0,
             max_tokens=512,  # Was 256 — truncated JSON caused fallback to garbage queries
             response_format_json=True,
@@ -230,14 +246,16 @@ _EVALUATE_PROMPT = """Does the following retrieved data actually answer this que
 Retrieved data:
 {learnings_text}
 
-Judge honestly:
-- "sufficient": true if this data can answer the question well, false if critical info is missing
-- "quality_score": 0.0 (completely irrelevant) to 1.0 (perfect answer)
-- "missing_aspects": list what specific information is still missing
-- "follow_up_queries": web search queries that would find the missing data
+Judge honestly using these criteria:
+- "sufficient": true if this data answers the question thoroughly with concrete metrics; false if critical info is missing
+- "quality_score": 0.0 (completely irrelevant) to 1.0 (perfect comprehensive answer)
+- "missing_aspects": list of what specific facts, figures, or aspects are still missing
+- "follow_up_queries": targeted web search queries that would find the missing data
 
-Return valid JSON:
-{{"sufficient": false, "confidence": 0.7, "quality_score": 0.3, "missing_aspects": ["box office revenue data", "filmography details"], "follow_up_queries": ["Tom Holland movies box office gross worldwide", "Zendaya filmography earnings"], "reasoning": "The data contains general mentions but lacks specific box office numbers needed to compare"}}"""
+Example: If question is "who has more blockbusters, Tom Holland or Zendaya":
+{{"sufficient": false, "quality_score": 0.35, "confidence": 0.85, "missing_aspects": ["box office revenue data for Tom Holland movies", "box office earnings for Zendaya filmography"], "follow_up_queries": ["Tom Holland movies worldwide box office gross", "Zendaya filmography box office totals"], "reasoning": "Retrieved data mentions their popularity but lacks specific box office numbers needed to compare"}}
+
+Now evaluate the retrieved data for MY question. Return valid JSON only:"""
 
 
 async def evaluate_learnings(
@@ -265,8 +283,8 @@ async def evaluate_learnings(
     
     # Format learnings for LLM (truncate to keep prompt small)
     learning_texts = []
-    for i, l in enumerate(learnings[:12]):  # Cap at 12 learnings
-        text = getattr(l, 'text', str(l))[:200]
+    for i, l in enumerate(learnings[:10]):  # Cap at 10 learnings
+        text = getattr(l, 'text', str(l))[:180]
         learning_texts.append(f"[{i+1}] {text}")
     
     prompt = _EVALUATE_PROMPT.format(
@@ -279,8 +297,10 @@ async def evaluate_learnings(
             {
                 "role": "system",
                 "content": (
-                    "You are a fast retrieval evaluation engine. Output strictly valid JSON. "
-                    "Keep reasoning under 15 words. Do not output markdown code fences or conversational text."
+                    "You are an automated API backend that outputs raw machine-readable JSON. "
+                    "CRITICAL: Do NOT output 'Here\\'s a thinking process', chain of thought, or preamble. "
+                    "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '{' and end with '}'. "
+                    "Keep reasoning under 10 words."
                 ),
             },
             {"role": "user", "content": prompt},
@@ -352,19 +372,22 @@ def _heuristic_evaluation(query: str, learnings: list) -> LearningEvaluation:
 
 # ── Reasoning Decision (Stop/Continue/Pivot) ──
 
-_DECISION_PROMPT = """I'm researching: "{query}"
-Status: {num_learnings} learnings collected | quality: {quality_score:.2f}/1.0 | round: {round_num} | {elapsed_s:.0f}s elapsed
+_DECISION_PROMPT = """I am directing an adaptive research agent for this objective: "{query}"
+Status: {num_learnings} facts collected | Quality: {quality_score:.2f}/1.0 | Round: {round_num} | Elapsed: {elapsed_s:.0f}s
 Missing info: {missing}
 {kg_context}
 {detective_context}
 
-Decide the best next action:
-- "continue": Search targeted web queries to find the missing data
-- "pivot": Current search angle has plateaued or missed the mark; pivot to alternative perspectives or fresh entity leads
-- "stop": Sufficient high-quality information has been collected to comprehensively answer the query
+Action Strategy Guidelines:
+- "continue": Critical aspects or factual data are still missing. Formulate targeted search queries to capture the missing metrics.
+- "pivot": Current search angle has plateaued or missed the mark; pivot to alternative perspectives or fresh entity leads.
+- "stop": Sufficient high-quality information has been collected to comprehensively answer the query.
 
-Return JSON:
-{{"action": "continue", "queries": ["Tom Holland Spider-Man box office worldwide gross", "Zendaya movies total earnings revenue"], "confidence": 0.8, "reasoning": "Need specific revenue numbers to compare"}}"""
+Example: If researching "who sold more albums, Drake or Kanye":
+{{"action": "continue", "queries": ["Drake total album sales worldwide certified units RIAA", "Kanye West total album sales worldwide certified"], "confidence": 0.85, "target": "certified sales comparison", "reasoning": "Need verified worldwide sales numbers to compare"}}
+
+Now decide the best next action for MY research trajectory.
+Return valid JSON only:"""
 
 
 async def decide_next_action(
@@ -433,8 +456,10 @@ async def decide_next_action(
             {
                 "role": "system",
                 "content": (
-                    "You are a research decision engine. Output strictly valid JSON. "
-                    "Keep reasoning under 15 words. No preamble, no conversational text."
+                    "You are an automated research decision engine. Output strictly raw JSON. "
+                    "CRITICAL: Do NOT output 'Here\\'s a thinking process', chain of thought, or preamble. "
+                    "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '{' and end with '}'. "
+                    "Keep reasoning under 10 words."
                 ),
             },
             {"role": "user", "content": prompt},
@@ -579,27 +604,102 @@ async def explore_connected_dots(
 # ── Utility ──
 
 def _parse_json(text: str) -> Optional[dict]:
-    """Extract JSON from LLM response (handles markdown code blocks)."""
-    # Try direct parse
+    """Extract JSON from LLM response (handles thinking tags, markdown blocks, trailing commas, truncations)."""
+    if not text:
+        return None
+
+    # Strip thinking tags <think>...</think>
+    clean = re.sub(r'<think>.*?</think>', '', str(text), flags=re.DOTALL).strip()
+
+    # 1. Try direct parse
     try:
-        return json.loads(text)
+        return json.loads(clean)
     except (json.JSONDecodeError, TypeError):
         pass
-    
-    # Try extracting from code block
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+
+    # 2. Try extracting from code block (handles cases with or without closing ```)
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', clean)
     if match:
+        block = match.group(1).strip()
         try:
-            return json.loads(match.group(1))
+            return json.loads(block)
         except (json.JSONDecodeError, TypeError):
-            pass
-    
-    # Try extracting JSON object
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if match:
+            # Clean trailing commas
+            cleaned_block = re.sub(r',\s*([\]}])', r'\1', block)
+            try:
+                return json.loads(cleaned_block)
+            except (json.JSONDecodeError, TypeError):
+                clean = block
+
+    # 3. Try extracting JSON object between first '{' and last '}'
+    start = clean.find('{')
+    end = clean.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        snippet = clean[start:end+1]
         try:
-            return json.loads(match.group())
+            return json.loads(snippet)
         except (json.JSONDecodeError, TypeError):
+            # Clean trailing commas
+            cleaned_snippet = re.sub(r',\s*([\]}])', r'\1', snippet)
+            try:
+                return json.loads(cleaned_snippet)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # 4. Fallback field extraction if JSON was truncated by max_tokens
+    extracted: dict = {}
+    action_match = re.search(r'"action"\s*:\s*"(\w+)"', clean)
+    if action_match:
+        extracted["action"] = action_match.group(1)
+
+    suff_match = re.search(r'"sufficient"\s*:\s*(true|false)', clean, re.IGNORECASE)
+    if suff_match:
+        extracted["sufficient"] = suff_match.group(1).lower() == "true"
+
+    qual_match = re.search(r'"quality_score"\s*:\s*([0-9.]+)', clean)
+    if qual_match:
+        try:
+            extracted["quality_score"] = float(qual_match.group(1))
+        except ValueError:
             pass
-    
+
+    conf_match = re.search(r'"confidence"\s*:\s*([0-9.]+)', clean)
+    if conf_match:
+        try:
+            extracted["confidence"] = float(conf_match.group(1))
+        except ValueError:
+            pass
+
+    target_match = re.search(r'"target"\s*:\s*"([^"]*)"', clean)
+    if target_match:
+        extracted["target"] = target_match.group(1)
+
+    reason_match = re.search(r'"reasoning"\s*:\s*"([^"]*)"', clean)
+    if reason_match:
+        extracted["reasoning"] = reason_match.group(1)
+
+    queries_match = re.search(r'"queries"\s*:\s*\[(.*?)\]', clean, re.DOTALL)
+    if queries_match:
+        raw_qs = re.findall(r'"([^"]+)"', queries_match.group(1))
+        extracted["queries"] = [q for q in raw_qs if q.strip()]
+
+    missing_match = re.search(r'"missing_aspects"\s*:\s*\[(.*?)\]', clean, re.DOTALL)
+    if missing_match:
+        raw_ms = re.findall(r'"([^"]+)"', missing_match.group(1))
+        extracted["missing_aspects"] = [m for m in raw_ms if m.strip()]
+
+    followup_match = re.search(r'"follow_up_queries"\s*:\s*\[(.*?)\]', clean, re.DOTALL)
+    if followup_match:
+        raw_fq = re.findall(r'"([^"]+)"', followup_match.group(1))
+        extracted["follow_up_queries"] = [f for f in raw_fq if f.strip()]
+
+    plans_match = re.search(r'"plans"\s*:\s*\[(.*?)\]', clean, re.DOTALL)
+    if plans_match:
+        # If plans array was generated but truncated, attempt minimal recovery
+        pass
+
+    if "action" in extracted or "sufficient" in extracted or "quality_score" in extracted:
+        return extracted
+
     return None
+

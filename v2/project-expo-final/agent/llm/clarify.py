@@ -78,7 +78,25 @@ async def generate_clarifying_question(
 
 
 def _parse(raw: str) -> dict:
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
+    if not raw:
         return {"should_ask": False, "question": "", "depends_on_search_target": False}
+    clean = re.sub(r'<think>.*?</think>', '', str(raw), flags=re.DOTALL).strip()
+    try:
+        return json.loads(clean)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', clean)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except (json.JSONDecodeError, TypeError):
+            clean = match.group(1).strip()
+    start = clean.find('{')
+    end = clean.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(clean[start:end+1])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {"should_ask": False, "question": "", "depends_on_search_target": False}
+

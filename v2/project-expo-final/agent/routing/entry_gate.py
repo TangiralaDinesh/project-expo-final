@@ -386,10 +386,27 @@ async def entry_gate(
 
 
 def _parse(raw: str) -> dict:
+    if not raw:
+        return {"needs_retrieval": True, "mode": "SEMANTIC", "reason": "empty_response"}
+    clean = re.sub(r'<think>.*?</think>', '', str(raw), flags=re.DOTALL).strip()
     try:
-        return json.loads(raw)
+        return json.loads(clean)
     except (json.JSONDecodeError, TypeError):
-        return {"needs_retrieval": True, "mode": "SEMANTIC", "reason": "parse_error_failed_safe"}
+        pass
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', clean)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except (json.JSONDecodeError, TypeError):
+            clean = match.group(1).strip()
+    start = clean.find('{')
+    end = clean.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(clean[start:end+1])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {"needs_retrieval": True, "mode": "SEMANTIC", "reason": "parse_error_failed_safe"}
 
 
 def _to_decision(parsed: dict) -> GateDecision:

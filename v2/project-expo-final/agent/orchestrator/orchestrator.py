@@ -113,28 +113,47 @@ class SubagentRegistry:
 
 # ── Decomposition via LLM ──
 
-_DECOMPOSE_SYSTEM = """You are a task decomposition engine. Given a research task,
-decide whether it needs to be broken into parallel sub-tasks for specialized subagents.
+_DECOMPOSE_SYSTEM = """You are an automated task decomposition engine. Given a research task, decide whether it needs to be broken into parallel sub-tasks for specialized subagents.
+Output strictly raw machine-readable JSON only. Zero conversational monologue, zero thinking process preamble, zero markdown fences. Start immediately with '{' and end with '}'.
 
 Available subagent types:
-- "retriever": semantic web search + knowledge base retrieval
-- "code_retriever": GitHub code search + AST analysis (for code implementation queries)
-- "code_gen_executor": direct code execution (for computation, file operations, analysis)
+- "retriever": semantic web search + knowledge base retrieval (for factual, comparative, and domain research)
+- "code_retriever": GitHub code search + AST analysis (for repository inspection and code implementations)
+- "code_gen_executor": direct code execution in a secure sandbox (for computation, file operations, algorithms)
 
-Rules:
-- Most queries need only 1 retriever subagent. Don't over-decompose.
-- Only decompose if the task has genuinely independent, parallel dimensions.
-- Use code_gen_executor only if the task explicitly needs code execution or computation.
-- Return empty nodes if the task should be answered directly (no retrieval needed).
+Decomposition Rules & Patterns:
+1. Multi-Entity Comparison (e.g. "Tom Holland vs Zendaya", "PostgreSQL vs MongoDB"):
+   Decompose into balanced parallel retriever nodes for each subject entity with fan_out_eligible=true.
+2. Conceptual + Implementation Research:
+   Decompose into a retriever node (concepts/docs) and a code_retriever node (repo/code examples).
+3. Complex Multi-Step Tasks:
+   Chain dependent sub-tasks using "depends_on": ["n1"].
+4. Simple / Single-Faceted Research:
+   Return a single retriever node. Do NOT over-decompose simple questions.
+5. Direct / Conversational:
+   Return empty nodes [] if the task can be answered without retrieval.
 
-Respond with ONLY a JSON object:
+Example (Comparison):
+Task: "Tom Holland vs Zendaya who has more blockbusters"
 {
   "nodes": [
-    {"node_id": "n1", "subagent_type": "retriever", "task": "specific subtask", "depends_on": []},
-    {"node_id": "n2", "subagent_type": "code_retriever", "task": "specific subtask", "depends_on": []}
+    {"node_id": "n1", "subagent_type": "retriever", "task": "Tom Holland films box office gross and blockbuster career statistics", "depends_on": []},
+    {"node_id": "n2", "subagent_type": "retriever", "task": "Zendaya films box office gross and blockbuster career statistics", "depends_on": []}
+  ],
+  "fan_out_eligible": true
+}
+
+Example (Code & Concept):
+Task: "How to implement WebSocket authentication in FastAPI"
+{
+  "nodes": [
+    {"node_id": "n1", "subagent_type": "retriever", "task": "FastAPI WebSocket authentication security best practices documentation", "depends_on": []},
+    {"node_id": "n2", "subagent_type": "code_retriever", "task": "FastAPI WebSocket auth middleware implementation code examples", "depends_on": []}
   ],
   "fan_out_eligible": false
-}"""
+}
+
+Respond with ONLY a raw JSON object:"""
 
 
 async def decompose_task(
@@ -470,7 +489,19 @@ async def decompose_task(
             {"role": "user", "content": f"Task: {task}\nGate mode: {gate_mode}"},
         ]
         raw = await client.chat_fast(messages, temperature=0.0, response_format_json=True)
-        parsed = json.loads(raw)
+        clean = re.sub(r'<think>.*?</think>', '', str(raw), flags=re.DOTALL).strip()
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', clean)
+        if match:
+            clean = match.group(1).strip()
+        start = clean.find('{')
+        end = clean.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            clean = clean[start:end+1]
+        try:
+            parsed = json.loads(clean)
+        except json.JSONDecodeError:
+            cleaned = re.sub(r',\s*([\]}])', r'\1', clean)
+            parsed = json.loads(cleaned)
 
         nodes = []
         for n in parsed.get("nodes", []):

@@ -134,10 +134,22 @@ Return JSON array:
 If everything important IS covered, return an empty array: []"""
 
     try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a research gap analysis engine. Output strictly a raw JSON array of gap objects. "
+                    "CRITICAL: Do NOT output conversational monologue, 'Here\\'s a thinking process', or preamble. "
+                    "Do NOT use markdown code blocks. Start your response IMMEDIATELY with '[' and end with ']'."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
         response = await client.chat_worker(
-            [{"role": "user", "content": prompt}],
-            temperature=0.3,
+            messages,
+            temperature=0.2,
             max_tokens=512,
+            response_format_json=True,
         )
 
         # Parse JSON
