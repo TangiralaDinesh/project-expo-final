@@ -53,6 +53,15 @@ def should_investigate_kg(query: str, gate_mode: str) -> bool:
     if len(words) < 2:
         return False
 
+    # Check for comparison signals (e.g. "vs", "versus", "compare", "between")
+    if any(w.lower() in {"vs", "versus", "compare", "comparison", "between", "difference"} for w in words):
+        return True
+
+    # Fast entity extraction check
+    entities = extract_entities_fast(query)
+    if entities:
+        return True
+
     # Count proper nouns (capitalized words not at sentence start)
     proper_nouns = [
         w for i, w in enumerate(words)
@@ -77,7 +86,7 @@ def should_investigate_kg(query: str, gate_mode: str) -> bool:
     # Time-sensitive + entity = definitely investigate
     has_specificity = any(w.lower() in _SPECIFICITY_SIGNALS for w in words)
 
-    if has_entities:
+    if has_entities or (has_specificity and len(words) >= 3):
         logger.debug(
             "KG gate: ACTIVATE — entities=%s, acronyms=%s, specific=%s",
             proper_nouns[:3], acronyms[:3], has_specificity,
@@ -94,6 +103,7 @@ def extract_entities_fast(query: str) -> list[str]:
     1. Acronyms (all caps, 2+ chars)
     2. Capitalized multi-word phrases ("Tom Holland", "Sri Chandrasekharendra")
     3. Single capitalized words that aren't question starters
+    4. Comparison entity extraction ("A vs B", case-insensitive)
     
     Returns deduplicated entity names.
     """
@@ -125,6 +135,30 @@ def extract_entities_fast(query: str) -> list[str]:
             # Only add if it's not the first word OR if it looks entity-like
             if i > 0 or (i == 0 and clean.lower() not in {w.lower() for w in question_starters}):
                 entities.append(clean)
+
+    # Pattern 4: Comparison entity extraction ("A vs B" or "A versus B", case-insensitive)
+    vs_match = re.search(r'\b(?:vs\.?|versus|compared to)\b', query, re.IGNORECASE)
+    if vs_match:
+        stopwords = {
+            "who", "what", "where", "when", "why", "how", "which", "whose", "whom",
+            "is", "are", "was", "were", "do", "does", "did", "have", "has", "had",
+            "more", "most", "less", "least", "than", "between",
+            "block", "busters", "box", "office", "movies", "films", "songs",
+        }
+        left_part = query[:vs_match.start()].strip()
+        right_part = query[vs_match.end():].strip()
+        
+        left_words = [w for w in left_part.split() if w.lower() not in stopwords]
+        if left_words:
+            entities.append(" ".join(w.capitalize() for w in left_words))
+            
+        right_words = []
+        for w in right_part.split():
+            if w.lower() in stopwords:
+                break
+            right_words.append(w)
+        if right_words:
+            entities.append(" ".join(w.capitalize() for w in right_words))
 
     # Deduplicate (case-insensitive)
     seen = set()

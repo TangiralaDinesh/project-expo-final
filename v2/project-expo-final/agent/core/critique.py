@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -94,11 +95,44 @@ class MultiCritiqueResult:
     disagreement: list[str] = field(default_factory=list)
 
 
-def _parse(raw: str) -> dict:
+def _safe_parse_json_dict(raw: str) -> dict:
+    """Safely parse JSON dict from LLM output, handling markdown fences and surrounding text."""
+    if not raw or not isinstance(raw, str):
+        return {}
+    raw_str = raw.strip()
     try:
-        return json.loads(raw)
+        data = json.loads(raw_str)
+        if isinstance(data, dict):
+            return data
     except (json.JSONDecodeError, TypeError):
-        return {"verdict": "reject", "concerns": ["critique response was not valid JSON"]}
+        pass
+    # Strip markdown code fences if present
+    if "```" in raw_str:
+        cleaned = re.sub(r"^```(?:json)?\s*", "", raw_str, flags=re.MULTILINE)
+        cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE).strip()
+        try:
+            data = json.loads(cleaned)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # Search for first { ... } block
+    m = re.search(r"\{.*\}", raw_str, re.DOTALL)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
+
+
+def _parse(raw: str) -> dict:
+    parsed = _safe_parse_json_dict(raw)
+    if parsed:
+        return parsed
+    return {"verdict": "reject", "concerns": ["critique response was not valid JSON"]}
 
 
 async def _run_one_persona(
@@ -191,8 +225,13 @@ async def run_critique_on_retrieval(
     """
     client = client or get_client()
     
-    # Prepare learnings summary for critique
-    learnings_summary = "; ".join(learnings[:5]) if learnings else "(no learnings yet)"
+    # Prepare learnings summary for critique (up to 8 learnings, truncated for prompt efficiency)
+    cleaned_learnings = [
+        getattr(l, "text", str(l))[:250].strip() for l in learnings[:8] if l
+    ]
+    learnings_summary = "\n- ".join(cleaned_learnings) if cleaned_learnings else "(no learnings yet)"
+    if cleaned_learnings:
+        learnings_summary = "- " + learnings_summary
     
     # Critique prompt for each persona
     critique_system = (
@@ -242,7 +281,7 @@ Respond with JSON:
                 temperature=CRITIQUE_TEMPERATURE,
                 response_format_json=True,
             )
-            parsed = json.loads(raw)
+            parsed = _safe_parse_json_dict(raw)
             return {
                 "persona": persona_name,
                 "gaps": parsed.get("gaps", []),

@@ -144,6 +144,7 @@ async def decompose_task(
     client: Optional[NIMClient] = None,
     satisfaction_tracker: Optional[SatisfactionTracker] = None,
     intent_analysis=None,
+    related_concepts: Optional[list[str]] = None,
 ) -> Decomposition:
     """
     DYNAMIC task decomposition using intent classification.
@@ -249,6 +250,8 @@ async def decompose_task(
                         f"Relevance level: {focus_area.relationship_type}\n"
                         f"Include key facts, properties, metrics, and comparability dimensions."
                     )
+                    if related_concepts:
+                        entity_task += f"\nRelated concepts: {', '.join(related_concepts[:4])}"
                     
                     nodes.append(TaskNode(
                         node_id=node_id,
@@ -313,8 +316,12 @@ async def decompose_task(
                     f"[NOTE: This query involves multiple concepts: {', '.join(focus_names)}. "
                     f"Retrieve information that covers the relationships and interactions between them.]"
                 )
+                if related_concepts:
+                    task_with_context += f"\n[Related KG context: {', '.join(related_concepts[:4])}]"
             else:
                 task_with_context = task
+                if related_concepts:
+                    task_with_context += f"\n[Related KG context: {', '.join(related_concepts[:4])}]"
             
             logger.info(
                 f"Single-retriever decomposition: intent={intent_analysis.intent.value}, "
@@ -535,28 +542,29 @@ async def run_orchestrator(
     client = client or get_client()
     coordinator = get_state_coordinator()  # Phase 5: Get state coordinator
 
-    # Query knowledge graph + decompose IN PARALLEL (both are I/O-bound)
+    # Query knowledge graph context and decompose with KG awareness
     features_enabled = getattr(thinking_profile, 'features_enabled', None) if thinking_profile else None
-
-    kg_task = query_knowledge_graph_for_context(task, features_enabled)
-    decompose_coro = decompose_task(
-        task, 
-        gate_mode, 
-        client=client,
-        satisfaction_tracker=satisfaction,
-        intent_analysis=intent_analysis,  # Reuse from query.py — skip duplicate classification
-    )
-    
-    related_concepts, decomposition = await asyncio.gather(
-        kg_task, decompose_coro, return_exceptions=True,
-    )
-    
-    if isinstance(related_concepts, Exception):
+    related_concepts = []
+    try:
+        related_concepts = await query_knowledge_graph_for_context(task, features_enabled)
+    except Exception as e:
+        logger.debug("KG context lookup failed: %s", e)
         related_concepts = []
-    if isinstance(decomposition, Exception):
-        logger.error("Decomposition failed: %s", decomposition)
+
+    try:
+        decomposition = await decompose_task(
+            task, 
+            gate_mode, 
+            client=client,
+            satisfaction_tracker=satisfaction,
+            intent_analysis=intent_analysis,  # Reuse from query.py — skip duplicate classification
+            related_concepts=related_concepts,
+        )
+    except Exception as e:
+        logger.error("Decomposition failed: %s", e)
         return {}
-    if not decomposition.nodes:
+
+    if not decomposition or not decomposition.nodes:
         return {}
 
     # Adjust max_subagents based on thinking depth if profile provided
@@ -668,6 +676,11 @@ async def run_orchestrator(
 
                 for name in decision.circuit_break:
                     registry.record_failure(name)
+                if last_result[0] and branching_options:
+                    try:
+                        setattr(last_result[0], 'branching_options', branching_options)
+                    except Exception:
+                        pass
                 if last_result[0] and last_result[0].success:
                     registry.record_success(node.subagent_type.value)
                     # Phase 5: Mark as complete

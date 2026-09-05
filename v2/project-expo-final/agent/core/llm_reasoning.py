@@ -109,7 +109,7 @@ async def generate_entity_research_plans(
         response = await client.chat_worker(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=256,
+            max_tokens=512,  # Was 256 — truncated JSON caused fallback to garbage queries
             response_format_json=True,
         )
         
@@ -158,14 +158,18 @@ def _fallback_entity_plans(query: str, entities: list[str]) -> list[EntityResear
     """Rule-based fallback when LLM fails — generates targeted queries from query context."""
     # Extract what's being compared from the query
     query_lower = query.lower()
+    # Normalize common misspellings/spacing for fuzzy matching
+    query_normalized = re.sub(r'\s+', '', query_lower)  # "block busters" → "blockbusters"
     comparison_aspects = []
     
     # Common comparison keywords → search terms
+    # Keys are checked both as-is (with spaces) AND normalized (no spaces)
     aspect_keywords = {
         "blockbuster": "blockbuster movies box office gross",
         "box office": "box office gross worldwide revenue",
         "album": "albums total sales certified units",
         "movie": "movies filmography box office",
+        "film": "filmography movies box office gross",
         "net worth": "net worth earnings salary",
         "award": "awards nominations wins",
         "hit": "hit songs movies chart performance",
@@ -174,14 +178,32 @@ def _fallback_entity_plans(query: str, entities: list[str]) -> list[EntityResear
         "height": "height physical stats",
         "age": "age birthday born",
         "popular": "popularity social media followers fans",
+        "revenue": "total revenue earnings gross",
+        "earning": "earnings revenue income gross",
+        "rich": "net worth earnings wealth",
+        "song": "songs discography chart performance",
+        "goal": "goals scored career statistics",
+        "score": "scores statistics career performance",
     }
     
     for keyword, aspect in aspect_keywords.items():
-        if keyword in query_lower:
+        # Match both exact ("blockbuster" in query) AND normalized ("blockbusters" in no-space query)
+        keyword_normalized = re.sub(r'\s+', '', keyword)
+        if keyword in query_lower or keyword_normalized in query_normalized:
             comparison_aspects.append(aspect)
     
     if not comparison_aspects:
-        comparison_aspects = ["key facts statistics data"]
+        # Last resort: extract noun phrases from query as search aspects
+        # instead of useless "key facts statistics data"
+        words = [w for w in query_lower.split() if len(w) > 3 and w not in {
+            'more', 'most', 'less', 'than', 'with', 'have', 'does', 'which',
+            'what', 'that', 'this', 'from', 'they', 'them', 'their', 'about',
+            'who', 'whom', 'whose',
+        }]
+        if words:
+            comparison_aspects = [' '.join(words[:3]) + ' statistics data comparison']
+        else:
+            comparison_aspects = ["career achievements statistics comparison"]
     
     plans = []
     for entity in entities:
@@ -272,11 +294,20 @@ async def evaluate_learnings(
             if q.strip() and q.lower().strip() not in template_indicators and len(q) > 5
         ]
         
+        # CRITICAL: Clamp quality_score to 0.0-1.0 range
+        # LLMs frequently return quality on a 1-10 scale despite the prompt saying 0-1.
+        # Without clamping, 8.4 > 0.85 → instant stop → kills the entire progressive loop.
+        raw_quality = float(parsed.get("quality_score", 0.5))
+        if raw_quality > 1.0:
+            raw_quality = raw_quality / 10.0  # Normalize 1-10 → 0.0-1.0
+            logger.debug("Quality score normalized from %.1f to %.2f (LLM used 1-10 scale)", raw_quality * 10, raw_quality)
+        quality_clamped = max(0.0, min(1.0, raw_quality))
+        
         return LearningEvaluation(
             sufficient=parsed.get("sufficient", False),
-            confidence=float(parsed.get("confidence", 0.5)),
+            confidence=max(0.0, min(1.0, float(parsed.get("confidence", 0.5)))),
             missing_aspects=parsed.get("missing_aspects", []),
-            quality_score=float(parsed.get("quality_score", 0.5)),
+            quality_score=quality_clamped,
             follow_up_queries=clean_followup,
             reasoning=parsed.get("reasoning", ""),
         )
@@ -311,12 +342,18 @@ def _heuristic_evaluation(query: str, learnings: list) -> LearningEvaluation:
 # ── Reasoning Decision (Stop/Continue/Pivot) ──
 
 _DECISION_PROMPT = """I'm researching: "{query}"
-Status: {num_learnings} learnings collected | quality: {quality_score:.1f}/1.0 | round: {round_num} | {elapsed_s:.0f}s elapsed
+Status: {num_learnings} learnings collected | quality: {quality_score:.2f}/1.0 | round: {round_num} | {elapsed_s:.0f}s elapsed
 Missing info: {missing}
 {kg_context}
+{detective_context}
 
-Should I continue searching or stop? If continue, give me 2 specific web search queries to find the missing data.
-Return JSON: {{"action": "continue", "queries": ["Tom Holland Spider-Man box office worldwide gross", "Zendaya movies total earnings revenue"], "confidence": 0.6, "reasoning": "Need specific revenue numbers to compare"}}"""
+Decide the best next action:
+- "continue": Search targeted web queries to find the missing data
+- "pivot": Current search angle has plateaued or missed the mark; pivot to alternative perspectives or fresh entity leads
+- "stop": Sufficient high-quality information has been collected to comprehensively answer the query
+
+Return JSON:
+{{"action": "continue", "queries": ["Tom Holland Spider-Man box office worldwide gross", "Zendaya movies total earnings revenue"], "confidence": 0.8, "reasoning": "Need specific revenue numbers to compare"}}"""
 
 
 async def decide_next_action(
@@ -329,6 +366,7 @@ async def decide_next_action(
     elapsed_s: float = 0,
     missing_aspects: list[str] = None,
     kg_context: list[str] = None,
+    detective_log: list[str] = None,
 ) -> ReasoningDecision:
     """LLM decides what to do next in the retrieval loop.
     
@@ -337,14 +375,16 @@ async def decide_next_action(
     """
     client = client or get_client()
     
-    # Fast path: if quality is very high and we have enough data, stop
-    if quality_score > 0.85 and len(learnings) >= 5:
+    # Fast path: only auto-stop if quality is near-perfect AND
+    # we have substantial learnings across at least one progressive round.
+    # Otherwise, let the LLM make the reasoning decision dynamically.
+    if quality_score > 0.95 and len(learnings) >= 12 and round_num >= 1:
         return ReasoningDecision(
             action="stop",
             target="",
             queries=[],
             confidence=0.9,
-            reasoning=f"High quality ({quality_score:.2f}) with {len(learnings)} learnings",
+            reasoning=f"High quality ({quality_score:.2f}) with {len(learnings)} learnings across progressive waves",
         )
     
     # Fast path: if too many rounds, force stop
@@ -362,6 +402,10 @@ async def decide_next_action(
         kg_text = f"Knowledge Graph Connections:\n" + "\n".join(f"- {c}" for c in kg_context[:5])
         kg_text += "\n(Consider exploring these connected concepts)"
     
+    detective_text = ""
+    if detective_log:
+        detective_text = "Detective Investigation Findings:\n" + "\n".join(f"- {d}" for d in detective_log[-5:])
+    
     prompt = _DECISION_PROMPT.format(
         query=query,
         num_learnings=len(learnings),
@@ -370,13 +414,14 @@ async def decide_next_action(
         missing=json.dumps(missing_aspects or []),
         elapsed_s=elapsed_s,
         kg_context=kg_text,
+        detective_context=detective_text,
     )
 
     try:
         response = await client.chat_worker(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=150,
+            max_tokens=200,
             response_format_json=True,
         )
         
@@ -402,8 +447,12 @@ async def decide_next_action(
             and len(q) > 5  # Reject very short placeholder text
         ]
         
+        raw_action = str(parsed.get("action", "continue")).lower().strip()
+        valid_actions = {"stop", "continue", "pivot", "dig_deeper"}
+        action = raw_action if raw_action in valid_actions else "continue"
+
         return ReasoningDecision(
-            action=parsed.get("action", "stop"),
+            action=action,
             target=parsed.get("target", ""),
             queries=clean_queries,
             confidence=float(parsed.get("confidence", 0.5)),
@@ -430,6 +479,7 @@ async def explore_connected_dots(
     learnings: list,
     *,
     client: Optional[NIMClient] = None,
+    ephemeral_kg: Optional[Any] = None,
 ) -> list[str]:
     """Use KG + LLM to find connected concepts worth exploring.
     
@@ -438,8 +488,18 @@ async def explore_connected_dots(
     """
     client = client or get_client()
     
-    # Try to get KG connections from the actual graph store
+    # Try to get KG connections from EphemeralKG (Detective KG) and graph store
     kg_connections = []
+
+    # Priority 1: Pull rich entity properties and cross-entity relations from EphemeralKG
+    if ephemeral_kg and getattr(ephemeral_kg, "entities", None):
+        for ename, profile in ephemeral_kg.entities.items():
+            for prop_name, prop_val in list(profile.properties.items())[:4]:
+                kg_connections.append(f"{ename} {prop_name}: {prop_val}")
+            if profile.aliases:
+                kg_connections.append(f"{ename} aliases: {', '.join(profile.aliases[:3])}")
+
+    # Priority 2: Ingested triples from graph store
     try:
         from ..knowledge.graph_store import get_graph_store
         graph = get_graph_store()
@@ -449,12 +509,13 @@ async def explore_connected_dots(
                 for t in triples:
                     # Collect connected entity names (not the query entity itself)
                     if t.object.lower() != entity.lower():
-                        kg_connections.append(t.object)
-                    if t.subject.lower() != entity.lower():
-                        kg_connections.append(t.subject)
-            kg_connections = list(set(kg_connections))[:8]
+                        kg_connections.append(f"{t.subject} -> {t.predicate} -> {t.object}")
+                    elif t.subject.lower() != entity.lower():
+                        kg_connections.append(f"{t.object} -> {t.predicate} -> {t.subject}")
     except Exception:
         pass  # KG not available, that's fine
+    
+    kg_connections = list(dict.fromkeys(kg_connections))[:8]
     
     if not kg_connections and not learnings:
         return []

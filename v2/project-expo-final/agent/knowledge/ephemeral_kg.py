@@ -182,6 +182,17 @@ class EphemeralKG:
 
         for entity_name, profile in self.entities.items():
             if not profile.is_rich:
+                # Discovered from learnings: generate a direct lead for this new entity
+                if profile.investigation_depth == 0:
+                    lead_q = f"{entity_name} {topic}"
+                    if lead_q.lower() not in exclude:
+                        queries.append(InvestigationQuery(
+                            query=lead_q,
+                            source="discovered_entity",
+                            priority=0.80,
+                            reasoning=f"Fresh lead discovered from retrieval: '{entity_name}'",
+                            entity_origin=entity_name,
+                        ))
                 continue
 
             # P1: Alias-based queries (HIGHEST value — new search surface)
@@ -247,6 +258,16 @@ class EphemeralKG:
             )
 
         return selected
+
+    def get_investigation_log(self) -> list[str]:
+        """Return the detective's notebook entries."""
+        return list(self._investigation_log)
+
+    def get_investigation_summary(self) -> str:
+        """Compact summary of detective findings for reasoning prompts."""
+        if not self._investigation_log:
+            return ""
+        return "Detective Notebook:\n" + "\n".join(f"- {entry}" for entry in self._investigation_log[-8:])
 
     def ingest_learnings(self, learnings: list, extract_fn=None):
         """After retrieval: feed learnings BACK into the KG.

@@ -43,6 +43,7 @@ from .core.reasoning import get_thinking_profile, get_thinking_profile_with_hist
 from .core.satisfaction import SatisfactionTracker
 from .core.intent_classifier import IntentClassifier
 from .core.resonance import should_continue_retrieval
+from .core.critique import run_critique_on_retrieval, RetrievalGapAnalysis
 from .core.tracing import start_query_trace, end_query_trace, get_current_trace
 from .core.query_fanout import fan_out_query, score_pilot_results, select_queries_by_eig
 from .core.gap_scanner import scan_for_gaps, format_gaps_for_user, _should_run_gap_scan
@@ -149,6 +150,9 @@ class QueryResult:
     # Plan 2: Comparison Query Analysis (Phase 1)
     comparison_analysis: Optional[dict] = None  # For "should I buy X or Y?" type queries
     # Structure: {"is_comparison": bool, "entities": [{"name": str, "learnings": []}], "comparison_verdict": str}
+    
+    # Detective Ephemeral KG Notebook
+    detective_log: list[str] = field(default_factory=list)  # Investigation findings & leads from EphemeralKG
 
 
 @dataclass
@@ -195,9 +199,9 @@ async def run_query(
     t0 = time.time()
     client = client or get_client()
     
-    # Determine use_code_execution from feature flags if not explicitly provided
+    # Determine features and use_code_execution (default to production flags)
+    features = getattr(settings, 'features', None) or FeatureFlags.production()
     if use_code_execution is None:
-        features = settings.features if hasattr(settings, 'features') else FeatureFlags.all_off()
         use_code_execution = features.code_execution_enabled
 
     # ── Semantic cache check ──
@@ -242,7 +246,7 @@ async def run_query(
     specificity = classify_prompt_specificity(query)
     
     # NEW Tier 1: Build thinking profile with satisfaction history if enabled
-    features = settings.features if hasattr(settings, 'features') else FeatureFlags.all_off()
+    features = getattr(settings, 'features', None) or FeatureFlags.production()
     
     if satisfaction and features.connectivity_enabled:
         profile = await get_thinking_profile_with_history(
@@ -458,7 +462,7 @@ async def run_query(
         try:
             await asyncio.wait_for(
                 asyncio.gather(fan_out_task, kg_task, return_exceptions=True),
-                timeout=2.0,
+                timeout=5.0,
             )
         except (asyncio.TimeoutError, Exception):
             pass  # Didn't finish in time, that's fine
@@ -489,15 +493,16 @@ async def run_query(
     # ── Initialize Speculative Exploration Engine ──
     # Feed KG-discovered dimensions into entropy-based exploration
     spec_engine = None
-    if ephemeral_kg and ephemeral_kg.entities:
-        entities_list = list(ephemeral_kg.entities.keys())
+    entities_list = list(ephemeral_kg.entities.keys()) if (ephemeral_kg and ephemeral_kg.entities) else extract_entities_fast(effective_query)
+    if entities_list:
         spec_engine = SpeculativeExplorationEngine(effective_query, entities=entities_list)
-        for ename, profile in ephemeral_kg.entities.items():
-            spec_engine.ingest_kg_properties(ename, profile.properties)
-            if profile.aliases:
-                spec_engine.ingest_aliases(ename, profile.aliases)
-            if profile.type_hierarchy:
-                spec_engine.ingest_type_hierarchy(ename, profile.type_hierarchy)
+        if ephemeral_kg and ephemeral_kg.entities:
+            for ename, profile in ephemeral_kg.entities.items():
+                spec_engine.ingest_kg_properties(ename, profile.properties)
+                if profile.aliases:
+                    spec_engine.ingest_aliases(ename, profile.aliases)
+                if profile.type_hierarchy:
+                    spec_engine.ingest_type_hierarchy(ename, profile.type_hierarchy)
         # Feed initial learnings to update coverage
         if all_learnings:
             spec_engine.ingest_learnings(all_learnings)
@@ -547,12 +552,8 @@ async def run_query(
         # Filter through redundancy tracker (removes near-duplicates of original + each other)
         fan_out_seed_queries = redundancy.filter_and_track(raw_seeds, source="fan_out")
 
-        # ── RELEVANCY GATE 1: Only supplement if coverage is genuinely thin ──
-        # Geohash principle: overview first, expand ONLY where gaps exist
-        initial_coverage_thin = len(all_learnings) < 6
-        if spec_engine:
-            # If speculative engine says entropy is low → we already have good coverage
-            initial_coverage_thin = initial_coverage_thin and spec_engine.total_entropy > 0.4
+        # ── RELEVANCY GATE 1: Supplement if coverage is thin (72353c8 baseline) ──
+        initial_coverage_thin = len(all_learnings) < 8
 
         if initial_coverage_thin and fan_out_seed_queries:
             logger.info(
@@ -587,6 +588,7 @@ async def run_query(
     unsatisfied_concepts = []
     wave_2_learnings = []
     llm_quality_score = 0.0
+    fresh_kg_queries_pool = []
     reasoning_start = time.time()  # Track reasoning loop start, not query start
 
     for retrieval_round in range(MAX_SATISFACTION_ROUNDS):
@@ -607,7 +609,7 @@ async def run_query(
             f"reasoning_round_{retrieval_round + 1}",
             round=retrieval_round + 1,
         ) as reason_span:
-            # ── STEP 1+2: Parallel LLM evaluation + KG exploration + heuristic ──
+            # ── STEP 1+2: Parallel LLM evaluation + KG exploration + AI Critique + heuristic ──
             # These are independent — run simultaneously to save ~3-6s per round
             entities_for_kg = satisfaction.extract_concepts(effective_query) if satisfaction else []
 
@@ -618,8 +620,16 @@ async def run_query(
             kg_coro = asyncio.wait_for(
                 explore_connected_dots(
                     effective_query, entities_for_kg, all_learnings, client=client,
+                    ephemeral_kg=ephemeral_kg,
                 ),
                 timeout=3.0,
+            )
+
+            critique_coro = run_critique_on_retrieval(
+                effective_query,
+                [getattr(l, 'text', str(l)) for l in all_learnings[:8]],
+                depth=retrieval_round + 1,
+                client=client,
             )
 
             heuristic_coro = None
@@ -632,14 +642,24 @@ async def run_query(
             # Gather all parallel tasks
             if heuristic_coro:
                 parallel_results = await asyncio.gather(
-                    eval_coro, kg_coro, heuristic_coro,
+                    eval_coro, kg_coro, critique_coro, heuristic_coro,
                     return_exceptions=True,
                 )
-                if isinstance(parallel_results[2], dict):
-                    satisfaction_scores = parallel_results[2]
+                if isinstance(parallel_results[3], dict):
+                    satisfaction_scores = parallel_results[3]
+                    try:
+                        geohash_step = geohash_tree.next_character(
+                            branches=list(satisfaction_scores.keys()),
+                            branch_scores=satisfaction_scores,
+                            satisfaction_scores=satisfaction_scores,
+                        )
+                        if geohash_step and geohash_step.chosen_branch:
+                            trace.add_attribute(reason_span, "geohash_branch", geohash_step.chosen_branch)
+                    except Exception as gh_err:
+                        logger.debug("GeoHash step skipped: %s", gh_err)
             else:
                 parallel_results = await asyncio.gather(
-                    eval_coro, kg_coro,
+                    eval_coro, kg_coro, critique_coro,
                     return_exceptions=True,
                 )
 
@@ -650,6 +670,7 @@ async def run_query(
                 break
 
             kg_context = parallel_results[1] if isinstance(parallel_results[1], list) else []
+            critique_result = parallel_results[2] if isinstance(parallel_results[2], RetrievalGapAnalysis) else None
 
             llm_quality_score = llm_eval.quality_score
             trace.add_attribute(reason_span, "llm_quality", llm_eval.quality_score)
@@ -662,9 +683,18 @@ async def run_query(
                 llm_eval.missing_aspects[:3],
             )
             
-            # If LLM says sufficient, stop
-            if llm_eval.sufficient and llm_eval.confidence > 0.6:
-                logger.info("LLM says sufficient (conf=%.2f), stopping", llm_eval.confidence)
+            # If LLM says sufficient, verify with critique consensus before early exit
+            has_critique_gaps = (
+                critique_result is not None and
+                bool(critique_result.gaps_found) and
+                critique_result.consensus_strength >= 0.5
+            )
+            can_stop_early = (
+                retrieval_round > 0 or
+                (llm_eval.sufficient and llm_eval.confidence > 0.85 and not llm_eval.missing_aspects and not has_critique_gaps)
+            )
+            if can_stop_early and llm_eval.sufficient and llm_eval.confidence > 0.7:
+                logger.info("Consensus confirmed sufficient (conf=%.2f), stopping", llm_eval.confidence)
                 break
             
             # ── STEP 2: Check resonance (are we getting new info?) ──
@@ -681,7 +711,8 @@ async def run_query(
                     break
             
             
-            # ── STEP 3: LLM decision (uses KG context from parallel Step 1+2) ──
+            # ── STEP 3: LLM decision (uses KG context from parallel Step 1+2 + Detective Log) ──
+            detective_log = ephemeral_kg.get_investigation_log() if ephemeral_kg else []
             try:
                 decision = await decide_next_action(
                     effective_query, all_learnings,
@@ -691,6 +722,7 @@ async def run_query(
                     elapsed_s=time.time() - t0,
                     missing_aspects=llm_eval.missing_aspects,
                     kg_context=kg_context,
+                    detective_log=detective_log,
                 )
             except Exception as e:
                 logger.warning("Decision failed: %s", e)
@@ -706,74 +738,132 @@ async def run_query(
             
             if decision.action == "stop":
                 break
+
+            # ── STEP 3.5: Pivot & Deepening Handling ──
+            pivot_pool = []
+            if decision.action == "pivot":
+                logger.info("Decision action: pivot — broadening inquiry to alternative aspects & entity leads")
+                # Actively pivot: gather alternative perspective queries from fan_out_plan and fresh KG leads
+                if fan_out_plan and getattr(fan_out_plan, "angle_queries", None):
+                    for q in fan_out_plan.angle_queries:
+                        if not redundancy.is_redundant(q):
+                            pivot_pool.append(q)
+                if fresh_kg_queries_pool:
+                    pivot_pool.extend(fresh_kg_queries_pool[:2])
+                elif fan_out_seed_queries:
+                    pivot_pool.extend(fan_out_seed_queries[:2])
+            elif decision.action == "dig_deeper":
+                logger.info("Decision action: dig_deeper — exploring granular metrics")
             
-            # ── STEP 4: Build follow-up queries from LLM eval + LLM decision + critique ──
+            # ── STEP 4: Balanced Multi-Channel Query Selection (No Priority Starvation) ──
             gap_queries = []
             
-            # Priority 1: LLM decision queries (most targeted)
-            gap_queries.extend(decision.queries[:3])
+            # Channel A: LLM Decision targeted queries (missing data focused)
+            channel_decision = [q for q in decision.queries if not redundancy.is_redundant(q)]
             
-            # Priority 2: LLM evaluation follow-up queries
-            for q in llm_eval.follow_up_queries[:2]:
-                if not any(q.lower()[:20] in existing.lower() for existing in gap_queries):
-                    gap_queries.append(q)
+            # Channel B: AI Critique persona suggested queries (adversarial & gap view)
+            channel_critique = []
+            if critique_result and critique_result.suggested_queries:
+                channel_critique = [q for q in critique_result.suggested_queries if not redundancy.is_redundant(q)]
             
-            # Priority 3: KG connected-dot queries
-            for q in kg_context[:2]:
-                if not any(q.lower()[:20] in existing.lower() for existing in gap_queries):
-                    gap_queries.append(q)
+            # Channel C: Relational & Knowledge Graph queries (Connecting Dots + Fresh Detective KG leads)
+            channel_kg = []
+            for q in kg_context:
+                if not redundancy.is_redundant(q):
+                    channel_kg.append(q)
+            if fresh_kg_queries_pool:
+                for q in fresh_kg_queries_pool:
+                    if not redundancy.is_redundant(q) and q not in channel_kg:
+                        channel_kg.append(q)
             
-            # Priority 3.5: Speculative exploration (dynamic entropy-maximizing queries)
-            # ── RELEVANCY GATE 2: Only speculate if entropy is still high ──
-            # Geohash: don't zoom deeper if overview already covers the topic
-            if spec_engine and len(gap_queries) < 4 and spec_engine.total_entropy > 0.3:
+            # Channel D: Speculative Exploration queries (entropy-maximizing dimension probes)
+            channel_spec = []
+            if spec_engine and spec_engine.total_entropy > 0.25:
                 spec_queries = spec_engine.generate_speculative_queries(
-                    budget=max(2, 4 - len(gap_queries)),
-                    min_gain=0.25,  # Higher threshold than default — be selective
+                    budget=2,
+                    min_gain=0.20,
                 )
                 for sq in spec_queries:
-                    if not any(sq.query.lower()[:20] in existing.lower() for existing in gap_queries):
-                        gap_queries.append(sq.query)
+                    if not redundancy.is_redundant(sq.query):
+                        channel_spec.append(sq.query)
                         logger.debug(
                             "Speculative query: '%s' (gain=%.2f, dims=%s, reason=%s)",
                             sq.query, sq.expected_gain, sq.dimensions_covered, sq.reasoning,
                         )
 
-            if not gap_queries:
-                # Fallback: use missing aspects as queries
-                for aspect in llm_eval.missing_aspects[:3]:
-                    gap_queries.append(f"{aspect} {effective_query}")
-            
-            if not gap_queries and fan_out_seed_queries:
-                # Priority 5: Unused fan-out seed queries (consume one per round)
-                gap_queries.append(fan_out_seed_queries.pop(0))
-            
-            if not gap_queries:
-                break
-            
-            # ── RELEVANCY GATE 3: Check if expansion is worth the latency ──
-            # Geohash: at each zoom level, ask "do we NEED more detail?" 
-            # If quality is already decent (>0.6) and we have 8+ learnings,
-            # only expand if the gap queries are genuinely novel (high entropy)
-            if llm_quality_score > 0.6 and len(all_learnings) >= 8:
-                gap_queries = redundancy.select_top_by_entropy(
-                    gap_queries,
-                    max_queries=2,  # Fewer queries when already decent
-                    min_entropy=0.25,  # Higher bar — only truly novel queries
-                )
+            # Assemble candidates in a balanced, multi-perspective fashion (up to 4 queries)
+            candidates = []
+            if decision.action == "pivot" and pivot_pool:
+                # Pivot prioritizes alternative perspective queries directly
+                candidates.extend(pivot_pool[:2])
+                if channel_critique:
+                    candidates.append(channel_critique[0])
+                if channel_kg:
+                    candidates.append(channel_kg[0])
             else:
-                gap_queries = redundancy.select_top_by_entropy(
-                    gap_queries,
-                    max_queries=4,
-                    min_entropy=0.1,
-                )
-            
-            if not gap_queries:
-                logger.info("All gap queries redundant — stopping")
+                # 1 targeted missing info from LLM decision
+                if channel_decision:
+                    candidates.append(channel_decision[0])
+                # 1 critique / adversarial probe from 4 personas
+                if channel_critique:
+                    candidates.append(channel_critique[0])
+                # 1 KG relational connection / fresh entity lead (Connecting Dots)
+                if channel_kg:
+                    candidates.append(channel_kg[0])
+                # 1 speculative entropy probe OR 2nd targeted decision query
+                if channel_spec:
+                    candidates.append(channel_spec[0])
+                elif len(channel_decision) > 1:
+                    candidates.append(channel_decision[1])
+                elif len(channel_critique) > 1:
+                    candidates.append(channel_critique[1])
+
+            # Deduplicate against history and each other
+            final_candidates = []
+            for q in candidates:
+                if q and q not in final_candidates:
+                    final_candidates.append(q)
+
+            # Fallback if candidates are thin
+            if len(final_candidates) < 2 and llm_eval.missing_aspects:
+                for aspect in llm_eval.missing_aspects[:2]:
+                    fallback_q = f"{aspect} {effective_query}"
+                    if fallback_q not in final_candidates:
+                        final_candidates.append(fallback_q)
+
+            if len(final_candidates) < 2 and fan_out_seed_queries:
+                final_candidates.append(fan_out_seed_queries.pop(0))
+
+            # Diamond 5: Self-directed computational verification if calculation needed
+            if features.self_tools_enabled:
+                try:
+                    from .core.self_tools import get_self_tool_router
+                    router = get_self_tool_router()
+                    tool_decision = await router.should_self_execute(
+                        effective_query,
+                        gap_description="; ".join(llm_eval.missing_aspects[:2]),
+                        learnings=all_learnings,
+                    )
+                    if tool_decision.should_execute:
+                        comp_learning = await router.execute_and_learn(tool_decision)
+                        if comp_learning:
+                            from .core.types import Learning
+                            all_learnings.append(Learning(
+                                text=comp_learning["text"],
+                                url=comp_learning.get("source_url", "self_computation"),
+                                title=comp_learning.get("title", "Computation"),
+                            ))
+                            logger.info("Self-tool computation added to learnings: %s", comp_learning["title"])
+                except Exception as e:
+                    logger.debug("Self-tool check skipped: %s", e)
+
+            if not final_candidates:
                 break
+
+            gap_queries = final_candidates[:4]
             
             logger.info(
-                "Progressive retrieval round %d: %d gap queries (after dedup): %s",
+                "Progressive retrieval round %d: %d gap queries (multi-channel): %s",
                 retrieval_round + 1, len(gap_queries), gap_queries[:3],
             )
             
@@ -807,15 +897,16 @@ async def run_query(
                 if ephemeral_kg and wave_2_learnings:
                     ephemeral_kg.ingest_learnings(wave_2_learnings)
                     # Generate fresh investigation queries from enriched KG
-                    fresh_kg_queries = ephemeral_kg.generate_investigation_queries(
+                    fresh_kg = ephemeral_kg.generate_investigation_queries(
                         max_queries=2,
                     )
-                    if fresh_kg_queries:
-                        fan_out_seed_queries.extend([q.query for q in fresh_kg_queries])
+                    if fresh_kg:
+                        fresh_kg_queries_pool = [q.query for q in fresh_kg]
+                        fan_out_seed_queries.extend([q.query for q in fresh_kg])
                         logger.info(
                             "KG enrichment: +%d new entities discovered, +%d fresh queries",
                             len([e for e in ephemeral_kg.entities.values() if e.investigation_depth == 0]),
-                            len(fresh_kg_queries),
+                            len(fresh_kg),
                         )
 
                 # ── Speculative Engine Update ──
@@ -890,6 +981,7 @@ async def run_query(
         learnings_count=len(all_learnings),
         max_depth=profile.max_depth,
         gate_mode=gate_result.mode,
+        gap_scanning_enabled=features.gap_scanning_enabled,
     ):
         async def _do_gap_scan():
             try:
@@ -907,10 +999,17 @@ async def run_query(
         stats.total_queries += 1
 
         if grade.grade == RetrievalGrade.CORRECT:
-            answer = await global_synthesis_llm(
-                effective_query, learnings_for_synthesis, client=client,
-                prompt_specificity=profile.prompt_specificity,
-            )
+            if zoom_level > 0:
+                from .llm.synthesis import synthesis_at_zoom_level
+                zoom_str = "focused" if zoom_level == 1 else "comprehensive"
+                answer = await synthesis_at_zoom_level(
+                    effective_query, learnings_for_synthesis, zoom_level=zoom_str, client=client
+                )
+            else:
+                answer = await global_synthesis_llm(
+                    effective_query, learnings_for_synthesis, client=client,
+                    prompt_specificity=profile.prompt_specificity,
+                )
         elif grade.grade == RetrievalGrade.INCORRECT:
             stats.corrected_count += 1
             logger.warning("CRAG: retrieval graded INCORRECT, discarding. Reason: %s", grade.reason)
@@ -926,10 +1025,17 @@ async def run_query(
             all_urls = []
         else:
             stats.corrected_count += 1
-            answer = await global_synthesis_llm(
-                effective_query, learnings_for_synthesis, client=client,
-                prompt_specificity=profile.prompt_specificity,
-            )
+            if zoom_level > 0:
+                from .llm.synthesis import synthesis_at_zoom_level
+                zoom_str = "focused" if zoom_level == 1 else "comprehensive"
+                answer = await synthesis_at_zoom_level(
+                    effective_query, learnings_for_synthesis, zoom_level=zoom_str, client=client
+                )
+            else:
+                answer = await global_synthesis_llm(
+                    effective_query, learnings_for_synthesis, client=client,
+                    prompt_specificity=profile.prompt_specificity,
+                )
     else:
         logger.warning("No learnings from retrieval, CRAG fallback to direct answer")
         answer = await direct_answer_llm(
@@ -956,7 +1062,7 @@ async def run_query(
     # ── Collect gap scan result (ran in parallel with grading+synthesis) ──
     if gap_scan_task:
         try:
-            gap_result = await asyncio.wait_for(gap_scan_task, timeout=3.0)
+            gap_result = await asyncio.wait_for(gap_scan_task, timeout=6.0)
             if gap_result and gap_result.should_present:
                 gap_text = format_gaps_for_user(gap_result)
                 if gap_text:
@@ -976,6 +1082,33 @@ async def run_query(
         answer, len(learnings_for_synthesis), effective_query
     )
 
+    # Collect branching options from orchestrator results
+    branching_options = []
+    if orch_results:
+        for res in orch_results.values():
+            opts = getattr(res, "branching_options", None)
+            if opts and isinstance(opts, list):
+                branching_options.extend(opts)
+
+    # Collect ambiguous GeoHash steps if branching is enabled (Tier 3)
+    if profile.branching_enabled and geohash_tree:
+        from .core.pivot import BranchingOption
+        for gh_step in geohash_tree.steps:
+            if getattr(gh_step, "needs_user_input", False) and getattr(gh_step, "available_branches", None):
+                for b in gh_step.available_branches:
+                    branching_options.append(
+                        BranchingOption(
+                            label=f"Explore: {b}",
+                            explanation=f"Deepen investigation on '{b}' (entropy: {gh_step.entropy:.2f})",
+                            confidence=gh_step.satisfaction.get(b, 0.5) if hasattr(gh_step, "satisfaction") else 0.5,
+                            evidence_level="moderate",
+                            estimated_depth=getattr(gh_step, "depth", 1) + 1,
+                        )
+                    )
+
+    if branching_options and not branching_session_id:
+        branching_session_id = f"branch_{int(time.time())}"
+
     result = QueryResult(
         answer=answer,
         learnings=learnings_for_synthesis,
@@ -988,9 +1121,12 @@ async def run_query(
         zoom_options=zoom_metadata,
         can_zoom_in=(zoom_level < 2),
         can_zoom_out=(zoom_level > 0),
+        branching_options=branching_options,
+        branching_session_id=branching_session_id,
         can_create_file=can_create_file,
         suggested_file_types=file_types,
         file_creation_reason=file_reason,
+        detective_log=ephemeral_kg.get_investigation_log() if ephemeral_kg else [],
     )
 
     if query_vec:
@@ -1061,6 +1197,11 @@ async def run_query_stream(
         yield StreamEvent(type="clarify", data=clarify_result.question)
         return
 
+    # ── Adjust query if memory resolved ambiguity ──
+    effective_query = query
+    if clarify_result.resolved_by_memory:
+        effective_query = f"{query} (context: {clarify_result.resolved_by_memory})"
+
     # ── SPECULATIVE STREAMING (L72): ──
     # Fire retrieval as background task, start streaming LLM's own knowledge
     # immediately. If retrieval adds new info, emit supplementary event.
@@ -1072,6 +1213,7 @@ async def run_query_stream(
         run_subagent=run_subagent,
         gate_mode=gate_result.mode,
         client=client,
+        thinking_profile=profile,
     ))
 
     # Start speculative streaming from LLM's own knowledge

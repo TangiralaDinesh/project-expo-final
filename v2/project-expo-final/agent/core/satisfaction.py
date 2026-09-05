@@ -321,7 +321,12 @@ class SatisfactionTracker:
         """
         # Simple extraction: capitalize words, remove common words
         words = query.split()
-        stopwords = {"vs", "versus", "and", "or", "the", "a", "an", "for", "to", "of", "in", "by", "with"}
+        stopwords = {
+            "vs", "versus", "and", "or", "the", "a", "an", "for", "to", "of", "in", "by", "with",
+            "who", "what", "where", "when", "why", "how", "which", "whose", "whom",
+            "more", "most", "less", "least", "than", "between",
+            "is", "are", "was", "were", "do", "does", "did", "have", "has", "had", "got", "gor",
+        }
         
         concepts = []
         i = 0
@@ -362,8 +367,8 @@ class SatisfactionTracker:
             concepts = self.extract_concepts(query)
         
         if not concepts or not learnings:
-            # No concepts or learnings → can't evaluate
-            return {c: 0.5 for c in concepts}
+            # No concepts or learnings → 0 satisfaction
+            return {c: 0.0 for c in (concepts or [])}
         
         satisfaction_scores = {}
         
@@ -374,22 +379,26 @@ class SatisfactionTracker:
             relevant_count = sum(
                 1 for learning in learnings
                 if concept_lower in learning.text.lower() or
-                   concept_lower in learning.title.lower()
+                   concept_lower in getattr(learning, 'title', '').lower()
             )
             
-            # Score based on coverage
-            coverage_ratio = min(relevant_count / max(1, len(learnings) * 0.3), 1.0)
+            if relevant_count == 0:
+                satisfaction_scores[concept] = 0.0
+                continue
+            
+            # Score based on coverage (aiming for 2-3 relevant learnings per concept)
+            coverage_ratio = min(relevant_count / 3.0, 1.0)
             
             # Check for depth (long snippets suggest detailed info)
             avg_snippet_length = (
                 sum(len(l.text) for l in learnings) / len(learnings)
                 if learnings else 0
             )
-            depth_score = min(avg_snippet_length / 500, 1.0)  # 500 chars = good depth
+            depth_score = min(avg_snippet_length / 400, 1.0)
             
             # Combined satisfaction (coverage matters more)
-            satisfaction = (coverage_ratio * 0.6) + (depth_score * 0.4)
-            satisfaction_scores[concept] = satisfaction
+            satisfaction = (coverage_ratio * 0.7) + (depth_score * 0.3)
+            satisfaction_scores[concept] = round(min(satisfaction, 1.0), 2)
         
         # Update internal state
         self.concepts_satisfaction.update(satisfaction_scores)

@@ -122,4 +122,5 @@ class FeatureFlags:
             citations_enabled=True,
             query_fanout_enabled=True,
             external_kg_enabled=True,
+            self_tools_enabled=True,
         )
